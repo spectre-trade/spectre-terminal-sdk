@@ -34,7 +34,11 @@ def check(name: str, operation: Callable[[], Any]) -> Any:
         print(f"FAIL {name}: {type(error).__name__}: {error}")
         return None
     elapsed = (time.monotonic() - started) * 1000
-    print(f"PASS {name}: {result} ({elapsed:.0f} ms)")
+    # A string result is the summary; an object is reported as "ok" and
+    # described by the caller on the next line, so the output stays one
+    # line per operation instead of a wall of repr.
+    summary = result if isinstance(result, str) else "ok"
+    print(f"PASS {name}: {summary} ({elapsed:.0f} ms)")
     return result
 
 
@@ -79,10 +83,10 @@ def main() -> int:
         return 1
 
     meta = check(
-        "meta", lambda: f"app {terminal.meta().app_version}, topics {terminal.meta().topics}"
+        "meta", lambda: (lambda m: f"app {m.app_version}, topics {m.topics}")(terminal.meta())
     )
     check(
-        "health", lambda: f"status {terminal.health().status}, clients {terminal.health().clients}"
+        "health", lambda: (lambda h: f"status {h.status}, clients {h.clients}")(terminal.health())
     )
 
     connections = check("connections", lambda: terminal.connections())
