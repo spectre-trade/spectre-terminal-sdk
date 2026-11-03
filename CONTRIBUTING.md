@@ -47,6 +47,11 @@ cd typescript
 npm ci
 npm test
 npm run typecheck
+
+# MCP server (needs the Python client from this checkout)
+cd mcp
+python3 -m venv .venv && .venv/bin/pip install -e ../python -e '.[dev]'
+.venv/bin/pytest
 ```
 
 A live smoke check against a running terminal (Local API on, token in
@@ -55,6 +60,7 @@ A live smoke check against a running terminal (Local API on, token in
 ```bash
 python/.venv/bin/python python/examples/smoke.py
 node typescript/examples/smoke.ts
+mcp/.venv/bin/python mcp/examples/smoke.py
 ```
 
 ## Style

@@ -13,7 +13,7 @@ on `127.0.0.1`.
 | --- | --- | --- | --- |
 | `spectre-terminal` | Python | `pip install spectre-terminal` | Python 3.10+ |
 | `@spectre-trade/terminal` | TypeScript / JavaScript | `npm install @spectre-trade/terminal` | Node 22+ |
-| `spectre-terminal-mcp` | MCP server for AI agents | `pip install spectre-terminal-mcp` | Python 3.10+, planned |
+| `spectre-terminal-mcp` | MCP server for AI agents | `pip install spectre-terminal-mcp` | Python 3.10+ |
 
 ## Before you start
 
@@ -83,6 +83,17 @@ for await (const frame of stream) {
 
 More runnable examples: [`python/examples/`](python/examples/),
 [`typescript/examples/`](typescript/examples/).
+
+### AI agents
+
+```bash
+pip install spectre-terminal-mcp
+claude mcp add spectre-terminal -e SPECTRE_LOCAL_API_TOKEN=spt_… -- spectre-terminal-mcp
+```
+
+Seven read-only tools — status, instrument lookup, snapshot, order book
+top, trades summary, clusters, candles — shaped for a model's context. See
+[docs/mcp.md](docs/mcp.md).
 
 ## Documentation
 

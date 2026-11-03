@@ -14,4 +14,7 @@ is a major bump and happens only with a new API version of the terminal.
   `/v1/stream` client, discovery through `instance.json`, contract tests
   against the terminal fixtures.
 - TypeScript client `@spectre-trade/terminal`: the same surface for Node 22+.
+- MCP server `spectre-terminal-mcp`: seven read-only tools over stdio on top of
+  the Python client (`terminal_status`, `find_instrument`, `market_snapshot`,
+  `order_book_top`, `recent_trades_summary`, `cluster_summary`, `candles`).
 - The contract copy (`contract/`) pinned to a terminal revision.
