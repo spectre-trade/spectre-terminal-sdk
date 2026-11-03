@@ -1,0 +1,61 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  python:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python: ["3.10", "3.13"]
+    defaults:
+      run:
+        working-directory: python
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - run: python -m pip install -e '.[dev]'
+      - run: ruff check . && ruff format --check .
+      - run: pytest -q
+
+  typescript:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node: [22, 24]
+    defaults:
+      run:
+        working-directory: typescript
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+          cache-dependency-path: typescript/package-lock.json
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+
+  contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fixtures are valid JSON and the contract copy is pinned
+        run: |
+          python3 - <<'EOF'
+          import json, pathlib, sys
+          fixtures = sorted(pathlib.Path("contract/fixtures").glob("*.json"))
+          assert fixtures, "no fixtures"
+          for f in fixtures:
+              json.loads(f.read_text(encoding="utf-8"))
+          pinned = pathlib.Path("contract/TERMINAL_VERSION").read_text(encoding="utf-8")
+          assert "commit=" in pinned and "api_version=1" in pinned, pinned
+          print(f"{len(fixtures)} fixtures ok")
+          EOF

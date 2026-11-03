@@ -1,0 +1,41 @@
+# Errors
+
+Every non-2xx HTTP response carries one body:
+
+```json
+{ "error": { "code": "unauthorized", "message": "token does not match" } }
+```
+
+The **code** is stable and part of the contract; the **message** is for
+humans and may change. The same codes appear in stream `error` frames. The
+clients raise `ApiError` with `code`, `message` and `status` (HTTP) and never
+include the token in the text.
+
+| Code | HTTP | When | What to do |
+| --- | --- | --- | --- |
+| `unauthorized` | 401 | the token does not match, or the API is switched off | copy the current token from the Settings App; check the toggle |
+| `forbidden` | 403 | an `Origin` header or a foreign `Host` | you are not using the SDK, or something rewrote the request |
+| `forbidden_scope` | 403 | the token lacks the operation's scope | see `meta().scopes` |
+| `not_found` | 404 | unknown path, unknown connection, or no connection for the instrument's venue and market | check the instrument address and `connections()` |
+| `invalid_request` | 400 | bad instrument, interval, depth, cursor, or a `connection_id` of another venue | fix the parameters |
+| `unsupported` | 501 | the venue is not relayed (MOEX), or the terminal was built without the market-data tap (`meta().topics` is empty) | nothing to retry |
+| `not_active` | 409 | clusters of the instrument are not computed yet | retry in a few seconds; the subscription is held |
+| `rate_limited` | 429 | stream connections, subscriptions, API-only instruments or the per-second subscription rate | wait and retry; reuse connections |
+| `unavailable` | 503 | the exchange, storage or coordinator did not answer; no data within 3 s | retry later |
+
+## Client-side errors
+
+Raised before or instead of a request:
+
+| Error | Meaning |
+| --- | --- |
+| `TokenMissing` | no token argument and `SPECTRE_LOCAL_API_TOKEN` is not set |
+| `LocalApiDisabled` | `instance.json` says the API is switched off |
+| `TerminalUnreachable` | connection refused or timed out: the terminal is not running, or listens on another port |
+| `IncompatibleTerminal` | `/v1/meta` reports an API version this client does not support |
+| `StreamRequestError` | a `subscribe`/`unsubscribe` was refused (carries the code above) |
+| `StreamClosed` | the server closed the stream with `1001`, `4008` or `4029` |
+
+All of them extend `SpectreTerminalError` (`SpectreTerminalError` in Python,
+the same name in TypeScript), so `except SpectreTerminalError` / `catch`
+on the base class covers everything the SDK raises on purpose.

@@ -1,0 +1,14 @@
+{
+  "instrument": "binance:futures:BTCUSDT",
+  "connection_id": 12,
+  "data": [
+    {
+      "id": null,
+      "price": "67000.1",
+      "qty": "0.012",
+      "side": "buy",
+      "ts": 1730294400125,
+      "exchange_ts": 1730294400119
+    }
+  ]
+}

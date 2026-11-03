@@ -1,0 +1,11 @@
+{
+  "status": "ok",
+  "uptime_ms": 1234,
+  "clients": 0,
+  "streams": 0,
+  "api_only_instruments": 0,
+  "dropped_events": 0,
+  "dropped_frames": 0,
+  "overflow_closes": 0,
+  "stream_available": true
+}

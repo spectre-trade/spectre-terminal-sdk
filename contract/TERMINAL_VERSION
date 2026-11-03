@@ -1,0 +1,5 @@
+# The spectre-terminal revision this copy of the contract and fixtures was taken from.
+# Updated only by scripts/sync_contract.py; do not edit by hand.
+commit=cf23ca40d
+app_version=1.9.6
+api_version=1

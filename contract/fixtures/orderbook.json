@@ -1,0 +1,8 @@
+{
+  "instrument": "binance:futures:BTCUSDT",
+  "connection_id": 12,
+  "ts": 1730294400123,
+  "depth": 20,
+  "bids": [["67000.1", "1.25"]],
+  "asks": [["67000.2", "0.40"]]
+}

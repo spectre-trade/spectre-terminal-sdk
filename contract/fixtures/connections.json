@@ -1,0 +1,18 @@
+{
+  "data": [
+    {
+      "id": 12,
+      "exchange": "binance",
+      "market": "futures",
+      "label": "Main",
+      "enabled": true,
+      "read_only": false,
+      "has_credentials": true,
+      "proxy_bound": false,
+      "status": {
+        "state": "connected",
+        "last_event": { "code": "connected", "ts": 1730294400123 }
+      }
+    }
+  ]
+}

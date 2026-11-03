@@ -1,0 +1,26 @@
+{
+  "instrument": "binance:futures:BTCUSDT",
+  "connection_id": 12,
+  "ts": 1730294400130,
+  "best_bid": ["67000.1", "1.25"],
+  "best_ask": ["67000.2", "0.40"],
+  "last_trade": {
+    "id": null,
+    "price": "67000.1",
+    "qty": "0.012",
+    "side": "buy",
+    "ts": 1730294400125,
+    "exchange_ts": 1730294400119
+  },
+  "mark_price": "67001.0",
+  "ticker": {
+    "price": "67000.1",
+    "change_24h_pct": "1.25",
+    "volume_24h": "81234.5",
+    "high_24h": null,
+    "low_24h": null,
+    "best_bid": null,
+    "best_ask": null,
+    "ts": 1730294400120
+  }
+}

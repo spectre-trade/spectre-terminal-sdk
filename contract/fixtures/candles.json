@@ -1,0 +1,17 @@
+{
+  "instrument": "binance:futures:BTCUSDT",
+  "connection_id": 12,
+  "interval": "1m",
+  "data": [
+    {
+      "ts": 1730294400000,
+      "open": "67000.1",
+      "high": "67010.5",
+      "low": "66990.0",
+      "close": "67003.4",
+      "volume": "52.1",
+      "quote_volume": "3490000.5",
+      "closed": true
+    }
+  ]
+}

@@ -1,0 +1,4 @@
+{
+  "candles": [{ "id": "1m", "duration_ms": 60000 }],
+  "clusters": [{ "id": "1m", "duration_ms": 60000 }]
+}

@@ -1,0 +1,32 @@
+{
+  "instrument": "binance:futures:BTCUSDT",
+  "connection_id": 12,
+  "interval": "5m",
+  "ts": 1730294400123,
+  "data": [
+    {
+      "interval": "5m",
+      "ts": 1730294100000,
+      "end_ts": 1730294400000,
+      "volume": "12.5",
+      "buy_volume": "7.25",
+      "sell_volume": "5.25",
+      "trades": 120,
+      "vwap": "67000.1",
+      "min_price": "66990.0",
+      "max_price": "67010.5",
+      "completed": false,
+      "last_trade_ts": 1730294399870,
+      "levels": [
+        {
+          "price": "67000.1",
+          "volume": "1.25",
+          "buy_volume": "0.75",
+          "sell_volume": "0.5",
+          "buy_trades": 3,
+          "sell_trades": 2
+        }
+      ]
+    }
+  ]
+}
