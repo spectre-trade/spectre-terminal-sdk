@@ -17,7 +17,10 @@ from spectre_terminal import (
     ApiError,
     BookTop,
     Event,
+    Fill,
     Gap,
+    Order,
+    OrdersUpdate,
     Stream,
     StreamClosed,
     StreamRequestError,
@@ -40,6 +43,7 @@ class ScriptedServer:
 
     def __init__(self) -> None:
         self.handshakes: list[Any] = []
+        self.requests: list[dict[str, Any]] = []
         self.closed_with: int | None = None
 
     def process_request(self, connection: ServerConnection, request: Any) -> Any:
@@ -55,6 +59,7 @@ class ScriptedServer:
         try:
             async for raw in connection:
                 request = json.loads(raw)
+                self.requests.append(request)
                 for frame in self.replies(request):
                     await connection.send(json.dumps(frame))
                 if request.get("instrument") == CLOSE_4008:
@@ -67,8 +72,9 @@ class ScriptedServer:
     def replies(request: dict[str, Any]) -> list[dict[str, Any]]:
         rid = request.get("request_id")
         if request["type"] == "unsubscribe":
-            if request["sub"] == "7:trades":
-                return [{"type": "unsubscribed", "request_id": rid, "sub": "7:trades"}]
+            sub = request["sub"]
+            if sub == "7:trades" or sub.startswith("12:account."):
+                return [{"type": "unsubscribed", "request_id": rid, "sub": sub}]
             return [
                 {
                     "type": "error",
@@ -78,6 +84,8 @@ class ScriptedServer:
                     "message": "no such subscription on this connection",
                 }
             ]
+        if request["topic"].startswith("account."):
+            return ScriptedServer.account_replies(request)
         if request["instrument"] == UNKNOWN:
             return [
                 {
@@ -116,6 +124,37 @@ class ScriptedServer:
             data = {key: book[key] for key in ("ts", "depth", "bids", "asks")}
             data["depth"] = request.get("params", {}).get("depth", data["depth"])
             frames.append({"type": "event", "sub": sub, "seq": 9, "ts": 2, "data": data})
+        return frames
+
+    @staticmethod
+    def account_replies(request: dict[str, Any]) -> list[dict[str, Any]]:
+        """Account topics: ``connection_id`` required, ``instrument`` must be absent."""
+        rid = request.get("request_id")
+        if "instrument" in request or request.get("connection_id") != 12:
+            return [
+                {
+                    "type": "error",
+                    "request_id": rid,
+                    "code": "invalid_request",
+                    "message": "account topics take connection_id, not instrument",
+                }
+            ]
+        topic = request["topic"]
+        sub = f"12:{topic}"
+        frames: list[dict[str, Any]] = [
+            {"type": "subscribed", "request_id": rid, "sub": sub, "connection_id": 12}
+        ]
+        if topic == "account.orders":
+            body = load_fixture("account_orders")
+            data = {
+                "instrument": INSTRUMENT,
+                "orders": body["data"],
+                "triggers": body["triggers"],
+            }
+            frames.append({"type": "event", "sub": sub, "seq": 3, "ts": 1, "data": data})
+        elif topic == "account.fills":
+            fill = load_fixture("account_fills")["data"][0]
+            frames.append({"type": "event", "sub": sub, "seq": 7, "ts": 1, "data": fill})
         return frames
 
 
@@ -255,6 +294,66 @@ def test_unsubscribe() -> None:
             await stream.subscribe("book.top", INSTRUMENT)
             kinds = [type(await stream.__anext__()) for _ in range(4)]
         assert kinds == [Event, Gap, SubscriptionError, Event]
+
+    run(test)
+
+
+def test_subscribe_account_fills_sends_connection_id_and_no_instrument() -> None:
+    async def test(server: ScriptedServer, port: int) -> None:
+        async with stream_for(port) as stream:
+            subscribed = await stream.subscribe("account.fills", connection_id=12)
+            assert subscribed.sub == "12:account.fills" and subscribed.connection_id == 12
+            assert subscribed.topic == "account.fills"
+            event = await stream.__anext__()
+        request = server.requests[0]
+        assert request["type"] == "subscribe" and request["topic"] == "account.fills"
+        assert request["connection_id"] == 12
+        assert "instrument" not in request
+        assert isinstance(event, Event) and event.topic == "account.fills"
+        assert isinstance(event.data, Fill)
+        assert event.data.price == Decimal("67000.1") and event.data.side == "buy"
+
+    run(test)
+
+
+def test_account_orders_event_is_typed() -> None:
+    async def test(server: ScriptedServer, port: int) -> None:
+        async with stream_for(port) as stream:
+            subscribed = await stream.subscribe("account.orders", connection_id=12)
+            assert subscribed.sub == "12:account.orders"
+            event = await stream.__anext__()
+            done = await stream.unsubscribe(subscribed)
+        assert done.sub == "12:account.orders"
+        assert isinstance(event, Event) and event.sub == "12:account.orders"
+        assert isinstance(event.data, OrdersUpdate)
+        assert event.data.instrument == INSTRUMENT
+        assert isinstance(event.data.orders[0], Order)
+        assert event.data.orders[0].key == "t-123456789012345678"
+        assert event.data.orders[0].order_type == "limit"
+        assert event.data.triggers[0].trigger_type == "stop_loss"
+
+    run(test)
+
+
+def test_account_topic_with_an_instrument_drops_it() -> None:
+    async def test(server: ScriptedServer, port: int) -> None:
+        async with stream_for(port) as stream:
+            # a positional instrument on an account topic is not sent: the server would refuse it
+            subscribed = await stream.subscribe("account.balances", INSTRUMENT, connection_id=12)
+            assert subscribed.sub == "12:account.balances"
+        assert "instrument" not in server.requests[0]
+
+    run(test)
+
+
+def test_subscribe_argument_errors_do_not_touch_the_socket() -> None:
+    async def test(server: ScriptedServer, port: int) -> None:
+        async with stream_for(port) as stream:
+            with pytest.raises(ValueError, match="connection_id"):
+                await stream.subscribe("account.fills")
+            with pytest.raises(ValueError, match="instrument"):
+                await stream.subscribe("trades")
+        assert server.requests == []
 
     run(test)
 

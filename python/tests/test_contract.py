@@ -11,26 +11,40 @@ from conftest import FIXTURES, load_fixture
 
 from spectre_terminal import models
 from spectre_terminal.models import (
+    Accepted,
+    AccountBalances,
+    AccountFills,
+    AccountOrders,
+    AccountPositions,
+    Balance,
     BookTop,
     Candles,
     Clusters,
     Connection,
     Event,
+    Fill,
     Gap,
     Health,
     Intervals,
     Level,
+    Limits,
     MarkPrice,
     Meta,
+    Order,
     OrderBook,
+    OrdersUpdate,
     Page,
+    Position,
+    PositionUpdate,
     Snapshot,
     Subscribed,
     SubscriptionError,
     Ticker,
     Trade,
     Trades,
+    TriggerOrder,
     Unsubscribed,
+    topic_of,
 )
 
 # fixture name -> parser. ``error`` is the envelope, not a model: the client turns it into ApiError.
@@ -46,6 +60,11 @@ PARSERS: dict[str, Any] = {
     "snapshot": Snapshot.from_dict,
     "orderbook": OrderBook.from_dict,
     "clusters": Clusters.from_dict,
+    "account_orders": AccountOrders.from_dict,
+    "account_positions": AccountPositions.from_dict,
+    "account_balances": AccountBalances.from_dict,
+    "account_fills": AccountFills.from_dict,
+    "accepted": Accepted.from_dict,
 }
 
 FIXTURE_NAMES = sorted(path.stem for path in FIXTURES.glob("*.json"))
@@ -90,8 +109,15 @@ def test_meta_types() -> None:
     assert meta.api_version == "1"
     assert isinstance(meta.limits.ws_connections_per_token, int)
     assert meta.limits.exchange_subscriptions_per_second == 5
-    assert meta.scopes == ["market:read", "connections:read"]
+    assert meta.limits.commands_per_second == 10
+    assert meta.scopes == ["market:read", "connections:read", "account:read", "trading:write"]
     assert meta.topics == []
+
+
+def test_limits_without_commands_per_second_is_an_older_terminal() -> None:
+    limits = load_fixture("meta")["limits"]
+    del limits["commands_per_second"]
+    assert Limits.from_dict(limits).commands_per_second == 0
 
 
 def test_health_types() -> None:
@@ -209,6 +235,120 @@ def test_cluster_without_trades() -> None:
     assert parsed.vwap is None and parsed.levels == []
 
 
+# --- account ------------------------------------------------------------------
+
+
+def test_account_orders_types() -> None:
+    orders = AccountOrders.from_dict(load_fixture("account_orders"))
+    assert orders.connection_id == 12
+    order = orders.data[0]
+    assert isinstance(order, Order)
+    assert order.key == "t-123456789012345678" and order.exchange_id == "987654321"
+    assert order.instrument == "binance:futures:BTCUSDT"
+    assert (order.side, order.order_type, order.status) == ("buy", "limit", "open")
+    assert not hasattr(order, "type"), "the JSON key `type` is `order_type` on the model"
+    assert order.price == Decimal("67000.1") and not isinstance(order.price, float)
+    assert order.size == Decimal("0.012") and order.filled == Decimal("0")
+    assert order.remaining == Decimal("0.012") and order.notional == Decimal("804")
+    assert order.created_ts == 1730294400123 and isinstance(order.created_ts, int)
+    trigger = orders.triggers[0]
+    assert isinstance(trigger, TriggerOrder)
+    assert trigger.id == "42" and trigger.trigger_type == "stop_loss"
+    assert trigger.trigger_price == Decimal("66000") and trigger.rule == "price_below_or_equal"
+    assert trigger.size == Decimal("0.012") and trigger.notional == Decimal("804")
+    assert (trigger.status, trigger.order_type, trigger.client_id) == ("open", "market", "c1")
+    assert trigger.created_ts == 1730294400123
+
+
+def test_account_orders_nulls() -> None:
+    body = load_fixture("account_orders")
+    body["data"][0].update(key=None, exchange_id=None, notional=None)
+    body["triggers"][0].update(
+        size=None, notional=None, order_type=None, client_id=None, created_ts=None
+    )
+    orders = AccountOrders.from_dict(body)
+    order, trigger = orders.data[0], orders.triggers[0]
+    assert order.key is None and order.exchange_id is None and order.notional is None
+    assert trigger.size is None and trigger.notional is None
+    assert trigger.order_type is None and trigger.client_id is None
+    assert trigger.created_ts is None
+    body["triggers"] = []
+    del body["data"]
+    assert AccountOrders.from_dict(body) == AccountOrders(12, [], [])
+
+
+def test_account_positions_types() -> None:
+    positions = AccountPositions.from_dict(load_fixture("account_positions"))
+    assert positions.connection_id == 12
+    position = positions.data[0]
+    assert isinstance(position, Position)
+    assert position.instrument == "binance:futures:BTCUSDT" and position.side == "long"
+    assert position.size == Decimal("0.5") and position.lot_size == Decimal("1")
+    assert position.entry_price == Decimal("66500") and position.notional == Decimal("33250")
+    assert position.unrealized_pnl == Decimal("250")
+    assert position.mark_price == Decimal("67000") and isinstance(position.mark_price, Decimal)
+
+
+def test_account_position_before_first_tick() -> None:
+    body = load_fixture("account_positions")
+    body["data"][0].update(mark_price=None, unrealized_pnl=None)
+    position = AccountPositions.from_dict(body).data[0]
+    assert position.mark_price is None and position.unrealized_pnl is None
+
+
+def test_account_balances_types() -> None:
+    balances = AccountBalances.from_dict(load_fixture("account_balances"))
+    assert balances.connection_id == 12
+    balance = balances.data[0]
+    assert isinstance(balance, Balance)
+    assert balance.currency == "USDT"
+    assert balance.total == Decimal("1000.5") and str(balance.total) == "1000.5"
+    assert balance.available == Decimal("900.5") and balance.locked == Decimal("100")
+    assert balance.ts == 1730294400123 and isinstance(balance.ts, int)
+
+
+def test_account_balance_unreported_parts() -> None:
+    body = load_fixture("account_balances")
+    body["data"][0].update(available=None, locked=None)
+    balance = AccountBalances.from_dict(body).data[0]
+    assert balance.available is None and balance.locked is None
+    assert balance.total == Decimal("1000.5")
+
+
+def test_account_fills_types() -> None:
+    fills = AccountFills.from_dict(load_fixture("account_fills"))
+    assert fills.connection_id == 12
+    fill = fills.data[0]
+    assert isinstance(fill, Fill)
+    assert fill.trade_id == "t1" and fill.order_id == "987654321"
+    assert fill.instrument == "binance:futures:BTCUSDT" and fill.side == "buy"
+    assert fill.price == Decimal("67000.1") and fill.qty == Decimal("0.012")
+    assert fill.fee == Decimal("0.32") and fill.fee_currency == "USDT"
+    assert fill.position_side == "long"
+    assert fill.ts == 1730294400123 and isinstance(fill.ts, int)
+
+
+def test_account_fill_on_a_one_way_venue() -> None:
+    body = load_fixture("account_fills")
+    body["data"][0].update(position_side=None, fee=None, fee_currency=None)
+    fill = AccountFills.from_dict(body).data[0]
+    assert fill.position_side is None and fill.fee is None and fill.fee_currency is None
+
+
+def test_accepted_types() -> None:
+    accepted = Accepted.from_dict(load_fixture("accepted"))
+    assert accepted.accepted is True
+    assert accepted.operation_id == "1730294400123-000001"
+    assert accepted.key == "t-173029440012300001"
+    assert accepted.connection_id == 12 and accepted.instrument == "binance:futures:BTCUSDT"
+
+
+def test_accepted_cancellation_has_no_key() -> None:
+    body = load_fixture("accepted")
+    body["key"] = None
+    assert Accepted.from_dict(body).key is None
+
+
 # --- stream frames, from the contract's examples -------------------------------
 
 
@@ -293,3 +433,89 @@ def test_gap_and_subscription_error_frames() -> None:
         {"type": "error", "sub": "7:trades", "code": "unavailable", "message": "venue refused"}
     )
     assert error.code == "unavailable" and error.topic == "trades"
+
+
+# --- account stream frames -------------------------------------------------------
+
+
+def test_topic_of_account_subscription_id() -> None:
+    assert topic_of("12:account.fills") == "account.fills"
+    assert topic_of("12:account.orders") == "account.orders"
+    assert topic_of("7:book.top") == "book.top"
+
+
+def test_event_frame_account_orders() -> None:
+    body = load_fixture("account_orders")
+    data = {
+        "instrument": "binance:futures:BTCUSDT",
+        "orders": body["data"],
+        "triggers": body["triggers"],
+    }
+    event = Event.from_dict(
+        {"type": "event", "sub": "12:account.orders", "seq": 3, "ts": 1, "data": data}
+    )
+    assert event.topic == "account.orders"
+    assert isinstance(event.data, OrdersUpdate)
+    assert event.data.instrument == "binance:futures:BTCUSDT"
+    assert isinstance(event.data.orders[0], Order) and event.data.orders[0].order_type == "limit"
+    assert isinstance(event.data.triggers[0], TriggerOrder)
+    emptied = Event.from_dict(
+        {
+            "type": "event",
+            "sub": "12:account.orders",
+            "seq": 4,
+            "ts": 2,
+            "data": {"instrument": "binance:futures:BTCUSDT", "orders": [], "triggers": []},
+        }
+    )
+    assert emptied.data == OrdersUpdate("binance:futures:BTCUSDT", [], [])
+
+
+def test_event_frame_account_positions() -> None:
+    position = load_fixture("account_positions")["data"][0]
+    event = Event.from_dict(
+        {
+            "type": "event",
+            "sub": "12:account.positions",
+            "seq": 1,
+            "ts": 1,
+            "data": {"instrument": position["instrument"], "position": position},
+        }
+    )
+    assert isinstance(event.data, PositionUpdate)
+    assert isinstance(event.data.position, Position)
+    assert event.data.position.size == Decimal("0.5")
+    closed = Event.from_dict(
+        {
+            "type": "event",
+            "sub": "12:account.positions",
+            "seq": 2,
+            "ts": 2,
+            "data": {"instrument": position["instrument"], "position": None},
+        }
+    )
+    assert isinstance(closed.data, PositionUpdate) and closed.data.position is None
+
+
+def test_event_frame_account_balances_and_fills() -> None:
+    balance = Event.from_dict(
+        {
+            "type": "event",
+            "sub": "12:account.balances",
+            "seq": 1,
+            "ts": 1,
+            "data": load_fixture("account_balances")["data"][0],
+        }
+    )
+    assert isinstance(balance.data, Balance) and balance.data.currency == "USDT"
+    fill = Event.from_dict(
+        {
+            "type": "event",
+            "sub": "12:account.fills",
+            "seq": 7,
+            "ts": 1,
+            "data": load_fixture("account_fills")["data"][0],
+        }
+    )
+    assert fill.topic == "account.fills"
+    assert isinstance(fill.data, Fill) and fill.data.qty == Decimal("0.012")

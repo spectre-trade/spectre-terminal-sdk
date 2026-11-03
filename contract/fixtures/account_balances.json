@@ -1,0 +1,12 @@
+{
+  "connection_id": 12,
+  "data": [
+    {
+      "currency": "USDT",
+      "total": "1000.5",
+      "available": "900.5",
+      "locked": "100",
+      "ts": 1730294400123
+    }
+  ]
+}

@@ -45,13 +45,28 @@ const KNOWN_TOPICS: ReadonlySet<string> = new Set<Topic>([
   "mark_price",
   "book.top",
   "clusters",
+  "account.orders",
+  "account.positions",
+  "account.balances",
+  "account.fills",
 ]);
 
-/** Options of {@link Stream.subscribe}. */
+/** Account topics are keyed by connection, not instrument. */
+function isAccountTopic(topic: Topic): boolean {
+  return topic.startsWith("account.");
+}
+
+/**
+ * Options of {@link Stream.subscribe}. Market topics (`trades`, `ticker`,
+ * `mark_price`, `book.top`, `clusters`) take `instrument`, with
+ * `connectionId` chosen by the general rule when omitted; account topics
+ * (`account.*`) take `connectionId` and no instrument.
+ */
 export interface SubscribeOptions {
   topic: Topic;
-  instrument: InstrumentAddress;
-  /** Chosen by the general rule when omitted. */
+  /** Required for market topics; ignored for `account.*`. */
+  instrument?: InstrumentAddress;
+  /** Required for `account.*`; chosen by the general rule for market topics when omitted. */
   connectionId?: number;
   /** Only `book.top` reads them; wire names (`depth`, `interval_ms`). */
   params?: BookTopParams;
@@ -78,6 +93,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+/** The topic of a subscription id: `"{stream}:{topic}"` or `"{connection}:account.<topic>"`. */
 function topicOf(sub: string): Topic | undefined {
   const name = sub.slice(sub.indexOf(":") + 1);
   return KNOWN_TOPICS.has(name) ? (name as Topic) : undefined;
@@ -309,19 +325,25 @@ export class Stream implements AsyncIterable<StreamFrame> {
   }
 
   /**
-   * Subscribe to a topic of an instrument. Resolves with the server's
-   * `subscribed` frame (plus the requested `topic` and `instrument`) and
-   * rejects with {@link StreamRequestError} on the server's `error` reply;
-   * events of other subscriptions keep flowing meanwhile. Note the terminal's
-   * limit on new exchange subscriptions per second (`/v1/meta`).
+   * Subscribe to a topic of an instrument, or to an account topic of a
+   * connection. Resolves with the server's `subscribed` frame (plus the
+   * requested `topic` and, for market topics, `instrument`) and rejects with
+   * {@link StreamRequestError} on the server's `error` reply; events of other
+   * subscriptions keep flowing meanwhile. Note the terminal's limit on new
+   * exchange subscriptions per second (`/v1/meta`); account topics do not
+   * touch the exchange and send no snapshot frame — read the current state
+   * with the `/v1/account/*` operations first.
    */
   async subscribe(options: SubscribeOptions): Promise<Subscribed> {
+    const account = isAccountTopic(options.topic);
     const request: SubscribeRequest = {
       type: "subscribe",
       request_id: this.#protocol.nextRequestId(),
       topic: options.topic,
-      instrument: options.instrument,
     };
+    if (!account && options.instrument !== undefined) {
+      request.instrument = options.instrument;
+    }
     if (options.connectionId !== undefined) {
       request.connection_id = options.connectionId;
     }
@@ -329,7 +351,11 @@ export class Stream implements AsyncIterable<StreamFrame> {
       request.params = options.params;
     }
     const reply = (await this.#send(request)) as SubscribedFrame;
-    return { ...reply, topic: options.topic, instrument: options.instrument };
+    const subscribed: Subscribed = { ...reply, topic: options.topic };
+    if (request.instrument !== undefined) {
+      subscribed.instrument = request.instrument;
+    }
+    return subscribed;
   }
 
   /**

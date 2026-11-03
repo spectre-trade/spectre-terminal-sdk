@@ -39,7 +39,15 @@ except ImportError:  # pragma: no cover - websockets 12
 
     _HEADERS_KWARG = "extra_headers"
 
-__all__ = ["CLOSE_RAISES", "FrameRouter", "Reply", "Stream"]
+__all__ = ["CLOSE_RAISES", "FrameRouter", "Reply", "Stream", "is_account_topic"]
+
+ACCOUNT_TOPIC_PREFIX = "account."
+
+
+def is_account_topic(topic: str) -> bool:
+    """``True`` for ``account.*`` topics: they subscribe by ``connection_id``, not by instrument."""
+    return topic.startswith(ACCOUNT_TOPIC_PREFIX)
+
 
 CLOSE_RAISES = frozenset({1001, 1006, 4008, 4029})
 """Close codes that end iteration with :class:`~spectre_terminal.errors.StreamClosed`.
@@ -274,28 +282,35 @@ class Stream:
     async def subscribe(
         self,
         topic: str,
-        instrument: str,
+        instrument: str | None = None,
         *,
         connection_id: int | None = None,
         **params: Any,
     ) -> Subscribed:
-        """Subscribe to ``topic`` for ``instrument`` and wait for the server's reply.
+        """Subscribe to ``topic`` and wait for the server's reply.
 
-        ``topic`` is one of ``/v1/meta``'s ``topics``: ``trades``,
-        ``ticker``, ``mark_price``, ``book.top``, ``clusters``. ``params``
-        matter only for ``book.top`` (``depth`` 1-200, ``interval_ms`` >= 50);
-        other topics ignore them. The reply names the subscription id and
-        the connection chosen; an ``error`` reply raises
+        ``topic`` is one of ``/v1/meta``'s ``topics``. Market topics
+        (``trades``, ``ticker``, ``mark_price``, ``book.top``, ``clusters``)
+        need ``instrument``; ``connection_id`` is optional and chosen by the
+        general rule without it. Account topics (``account.orders``,
+        ``account.positions``, ``account.balances``, ``account.fills``) need
+        ``connection_id`` and take no instrument: the request carries none.
+        ``params`` matter only for ``book.top`` (``depth`` 1-200,
+        ``interval_ms`` >= 50); other topics ignore them. The reply names the
+        subscription id and the connection; an ``error`` reply raises
         :class:`~spectre_terminal.errors.StreamRequestError`.
         """
-        request: dict[str, Any] = {
-            "type": "subscribe",
-            "topic": topic,
-            "instrument": instrument,
-            "params": dict(params),
-        }
+        account = is_account_topic(topic)
+        if account and connection_id is None:
+            raise ValueError(f"{topic} needs connection_id: account topics have no default")
+        if not account and instrument is None:
+            raise ValueError(f"{topic} needs an instrument")
+        request: dict[str, Any] = {"type": "subscribe", "topic": topic}
+        if instrument is not None and not account:
+            request["instrument"] = instrument
         if connection_id is not None:
             request["connection_id"] = int(connection_id)
+        request["params"] = dict(params)
         frame = await self._request(request)
         if frame.get("type") == "subscribed":
             return Subscribed.from_dict(frame)

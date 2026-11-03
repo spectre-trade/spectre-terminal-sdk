@@ -29,10 +29,16 @@ export type Side = "buy" | "sell";
 type OpenString = string & Record<never, never>;
 
 /** Token scopes known to v1. New scopes may appear within v1. */
-export type Scope = "market:read" | "connections:read" | OpenString;
+export type Scope = "market:read" | "connections:read" | "account:read" | "trading:write" | OpenString;
+
+/** Market topics: `instrument` is required on subscribe, `connection_id` is chosen by the general rule. */
+export type MarketTopic = "trades" | "ticker" | "mark_price" | "book.top" | "clusters";
+
+/** Account topics: `connection_id` is required on subscribe, `instrument` is not used. */
+export type AccountTopic = "account.orders" | "account.positions" | "account.balances" | "account.fills";
 
 /** Stream topics known to v1. */
-export type Topic = "trades" | "ticker" | "mark_price" | "book.top" | "clusters";
+export type Topic = MarketTopic | AccountTopic;
 
 /** Error codes of the contract. New codes may appear within v1. */
 export type ErrorCode =
@@ -44,11 +50,33 @@ export type ErrorCode =
   | "unsupported"
   | "not_active"
   | "rate_limited"
+  | "not_tradable"
   | "unavailable"
   | OpenString;
 
 /** `status.state` of a connection. */
 export type ConnectionState = "disabled" | "enabled" | "connecting" | "connected" | "failed";
+
+/** Order type: `limit` needs a price, `market` takes none. */
+export type OrderType = "limit" | "market";
+
+/** Status of an open order. */
+export type OrderStatus = "pending" | "open" | "partially_filled";
+
+/** Kind of a trigger order. */
+export type TriggerType = "stop_loss" | "take_profit" | "stop";
+
+/** When a trigger fires. */
+export type TriggerRule = "price_above_or_equal" | "price_below_or_equal";
+
+/** Status of a trigger order. */
+export type TriggerStatus = "open" | "finished" | "inactive" | "invalid";
+
+/** Side of a position. */
+export type PositionSide = "long" | "short";
+
+/** Time in force of a placed order; absent — the venue's default. */
+export type TimeInForce = "gtc" | "ioc" | "fok" | "post_only";
 
 /** The error envelope every non-2xx response carries. */
 export interface ErrorEnvelope {
@@ -72,6 +100,11 @@ export interface Limits {
   subscriptions_per_connection: number;
   api_only_instruments: number;
   exchange_subscriptions_per_second: number;
+  /**
+   * Trading commands per second per listener. Absent on terminals older
+   * than the writing stage of the Local API.
+   */
+  commands_per_second?: number;
 }
 
 /** `GET /v1/meta`. */
@@ -317,6 +350,156 @@ export interface Clusters {
 }
 
 // ---------------------------------------------------------------------------
+// /v1/account/*
+
+/** An open order of a connection. */
+export interface Order {
+  /** The terminal's order key (`t-…`); `null` while unknown. */
+  key: string | null;
+  /** The exchange's order id; `null` while unknown. */
+  exchange_id: string | null;
+  instrument: InstrumentAddress;
+  side: Side;
+  type: OrderType;
+  price: Decimal;
+  /** In the base coin. */
+  size: Decimal;
+  filled: Decimal;
+  remaining: Decimal;
+  /** The quote amount the trader entered; `null` for an order from an exchange snapshot. */
+  notional: Decimal | null;
+  status: OrderStatus;
+  created_ts: Timestamp;
+}
+
+/** A trigger order (stop loss, take profit, stop) of a connection. */
+export interface TriggerOrder {
+  id: string;
+  instrument: InstrumentAddress;
+  type: TriggerType;
+  trigger_price: Decimal;
+  rule: TriggerRule;
+  size: Decimal | null;
+  notional: Decimal | null;
+  status: TriggerStatus;
+  /** The order placed when the trigger fires; `null` when unknown. */
+  order_type: string | null;
+  client_id: string | null;
+  created_ts: Timestamp | null;
+}
+
+/** `GET /v1/account/orders`: open orders and trigger orders of one connection. */
+export interface AccountOrders {
+  connection_id: number;
+  data: Order[];
+  triggers: TriggerOrder[];
+}
+
+/** An open position. */
+export interface Position {
+  instrument: InstrumentAddress;
+  side: PositionSide;
+  /** In the base coin; on MOEX in lots. */
+  size: Decimal;
+  /** Base units per lot. */
+  lot_size: Decimal;
+  entry_price: Decimal;
+  /** In the quote. */
+  notional: Decimal;
+  /** As the terminal computes it. */
+  unrealized_pnl: Decimal;
+  /** The terminal's mark: best bid for a long, best ask for a short; `null` until the first book tick. */
+  mark_price: Decimal | null;
+}
+
+/** `GET /v1/account/positions`. */
+export interface AccountPositions {
+  connection_id: number;
+  data: Position[];
+}
+
+/** The latest balance of one currency, as the exchange reported it. */
+export interface Balance {
+  currency: string;
+  total: Decimal;
+  /** `null` when the venue does not report it. */
+  available: Decimal | null;
+  locked: Decimal | null;
+  /** Exchange time where there is one, otherwise the receive time. */
+  ts: Timestamp;
+}
+
+/** `GET /v1/account/balances`: currencies that changed since the API was switched on. */
+export interface AccountBalances {
+  connection_id: number;
+  data: Balance[];
+}
+
+/** A fill of the connection's own order. */
+export interface Fill {
+  trade_id: string;
+  order_id: string;
+  instrument: InstrumentAddress;
+  side: Side;
+  price: Decimal;
+  qty: Decimal;
+  fee: Decimal;
+  fee_currency: string;
+  /** `long` / `short` on hedged venues, otherwise `null`. */
+  position_side: PositionSide | null;
+  ts: Timestamp;
+}
+
+/** `GET /v1/account/fills`, oldest to newest. */
+export interface AccountFills {
+  connection_id: number;
+  data: Fill[];
+}
+
+// ---------------------------------------------------------------------------
+// POST /v1/orders, DELETE /v1/orders/{id}, POST /v1/orders/cancel-all, POST /v1/positions/close
+
+/** The body of `POST /v1/orders` as sent on the wire. */
+export interface PlaceOrderRequest {
+  connection_id: number;
+  instrument: InstrumentAddress;
+  side: Side;
+  type: OrderType;
+  /** Required for `limit`, absent for `market`. */
+  price?: Decimal;
+  /** Amount in the base coin; exactly one of `size` and `notional`. */
+  size?: Decimal;
+  /** The quote amount; exactly one of `size` and `notional`. */
+  notional?: Decimal;
+  reduce_only?: boolean;
+  post_only?: boolean;
+  time_in_force?: TimeInForce;
+  /** Idempotency key: a repeat with the same key returns the previous answer. */
+  client_key?: string;
+}
+
+/** The body of `POST /v1/orders/cancel-all` and `POST /v1/positions/close`. */
+export interface InstrumentCommandRequest {
+  connection_id: number;
+  instrument: InstrumentAddress;
+}
+
+/**
+ * The answer of every trading command: accepted **by the terminal**, not by
+ * the exchange. The exchange's confirmation, fill or rejection arrives
+ * through `account.orders` in the stream or `GET /v1/account/orders`.
+ */
+export interface Accepted {
+  accepted: boolean;
+  /** The operation in the terminal's operations file. */
+  operation_id: string;
+  /** The terminal's order key under which the order appears in `account.orders`; `null` for cancellations. */
+  key: string | null;
+  connection_id: number;
+  instrument: InstrumentAddress;
+}
+
+// ---------------------------------------------------------------------------
 // /v1/stream
 
 /** Parameters of a `book.top` subscription; other topics take none. Wire names. */
@@ -332,7 +515,9 @@ export interface SubscribeRequest {
   type: "subscribe";
   request_id: string;
   topic: Topic;
-  instrument: InstrumentAddress;
+  /** Required for market topics, omitted for `account.*`. */
+  instrument?: InstrumentAddress;
+  /** Chosen by the general rule for market topics, required for `account.*`. */
   connection_id?: number;
   params?: BookTopParams;
 }
@@ -348,7 +533,7 @@ export interface UnsubscribeRequest {
 export interface SubscribedFrame {
   type: "subscribed";
   request_id?: string;
-  /** Subscription id, `"{stream}:{topic}"`; pass it to `unsubscribe`. */
+  /** Subscription id, `"{stream}:{topic}"` (`"{connection}:account.<topic>"`); pass it to `unsubscribe`. */
   sub: string;
   connection_id: number;
 }
@@ -402,10 +587,24 @@ export interface SubscriptionError {
 /** What `subscribe` resolves with: the `subscribed` frame plus what was asked for. */
 export interface Subscribed extends SubscribedFrame {
   topic: Topic;
-  instrument: InstrumentAddress;
+  /** Absent for `account.*` subscriptions. */
+  instrument?: InstrumentAddress;
 }
 
-/** Every event the client can tag by topic; `topic` is read from `sub`. */
+/** `data` of an `account.orders` event: orders and triggers of one instrument after a change. */
+export interface OrdersUpdate {
+  instrument: InstrumentAddress;
+  orders: Order[];
+  triggers: TriggerOrder[];
+}
+
+/** `data` of an `account.positions` event; a close arrives as `position: null`. */
+export interface PositionUpdate {
+  instrument: InstrumentAddress;
+  position: Position | null;
+}
+
+/** Every event the client can tag by topic; `topic` is read from `sub` (the part after the first colon). */
 export interface TradesEvent extends EventFrame<Trade[]> {
   topic: "trades";
 }
@@ -426,6 +625,22 @@ export interface ClustersEvent extends EventFrame<ClusterBucket> {
   topic: "clusters";
 }
 
+export interface AccountOrdersEvent extends EventFrame<OrdersUpdate> {
+  topic: "account.orders";
+}
+
+export interface AccountPositionsEvent extends EventFrame<PositionUpdate> {
+  topic: "account.positions";
+}
+
+export interface AccountBalancesEvent extends EventFrame<Balance> {
+  topic: "account.balances";
+}
+
+export interface AccountFillsEvent extends EventFrame<Fill> {
+  topic: "account.fills";
+}
+
 /**
  * An event of a topic this client version does not know (the contract may add
  * topics within v1). `topic` is `undefined`; the raw topic name is the part of
@@ -442,6 +657,10 @@ export type Event =
   | MarkPriceEvent
   | BookTopEvent
   | ClustersEvent
+  | AccountOrdersEvent
+  | AccountPositionsEvent
+  | AccountBalancesEvent
+  | AccountFillsEvent
   | UnknownTopicEvent;
 
 /** What iterating a {@link Stream} yields, in arrival order. */

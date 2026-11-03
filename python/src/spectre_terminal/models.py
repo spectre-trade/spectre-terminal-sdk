@@ -15,6 +15,12 @@ from decimal import Decimal
 from typing import Any, Generic, NamedTuple, TypeVar
 
 __all__ = [
+    "Accepted",
+    "AccountBalances",
+    "AccountFills",
+    "AccountOrders",
+    "AccountPositions",
+    "Balance",
     "BookTop",
     "Candle",
     "Candles",
@@ -24,6 +30,7 @@ __all__ = [
     "Connection",
     "ConnectionStatus",
     "Event",
+    "Fill",
     "Gap",
     "Health",
     "Instrument",
@@ -34,14 +41,19 @@ __all__ = [
     "Limits",
     "MarkPrice",
     "Meta",
+    "Order",
     "OrderBook",
+    "OrdersUpdate",
     "Page",
+    "Position",
+    "PositionUpdate",
     "Snapshot",
     "Subscribed",
     "SubscriptionError",
     "Ticker",
     "Trade",
     "Trades",
+    "TriggerOrder",
     "Unsubscribed",
 ]
 
@@ -92,12 +104,18 @@ def _levels(pairs: Sequence[Sequence[Any]] | None) -> list[Level]:
 
 @dataclass(frozen=True)
 class Limits:
-    """Ceilings of the stream, as printed by ``/v1/meta``."""
+    """Ceilings of the stream and of trading, as printed by ``/v1/meta``.
+
+    ``commands_per_second`` is the trading-command rate per listener; it is
+    ``0`` for a terminal older than the writing stage, which prints no such
+    limit because it accepts no commands.
+    """
 
     ws_connections_per_token: int
     subscriptions_per_connection: int
     api_only_instruments: int
     exchange_subscriptions_per_second: int
+    commands_per_second: int = 0
 
     @classmethod
     def from_dict(cls, d: Mapping[str, Any]) -> Limits:
@@ -106,6 +124,7 @@ class Limits:
             subscriptions_per_connection=int(d["subscriptions_per_connection"]),
             api_only_instruments=int(d["api_only_instruments"]),
             exchange_subscriptions_per_second=int(d["exchange_subscriptions_per_second"]),
+            commands_per_second=int(d.get("commands_per_second") or 0),
         )
 
 
@@ -625,11 +644,316 @@ class Clusters:
         )
 
 
+# --- /v1/account/* ------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class Order:
+    """An open order of a connection: ``pending``, ``open`` or ``partially_filled``.
+
+    ``key`` is the terminal's order key (``t-...``), ``exchange_id`` the
+    exchange's id; either is ``None`` while unknown. ``size``, ``filled`` and
+    ``remaining`` are in the base coin; ``notional`` is the quote amount the
+    trader entered, ``None`` for an order that came from an exchange
+    snapshot. The JSON key ``type`` is :attr:`order_type` here.
+    """
+
+    key: str | None
+    exchange_id: str | None
+    instrument: str
+    side: str
+    order_type: str
+    price: Decimal | None
+    size: Decimal
+    filled: Decimal
+    remaining: Decimal
+    notional: Decimal | None
+    status: str
+    created_ts: int
+
+    @classmethod
+    def from_dict(cls, d: Mapping[str, Any]) -> Order:
+        return cls(
+            key=_optional_str(d.get("key")),
+            exchange_id=_optional_str(d.get("exchange_id")),
+            instrument=str(d["instrument"]),
+            side=str(d["side"]),
+            order_type=str(d["type"]),
+            price=_optional_decimal(d.get("price")),
+            size=_decimal(d["size"]),
+            filled=_decimal(d["filled"]),
+            remaining=_decimal(d["remaining"]),
+            notional=_optional_decimal(d.get("notional")),
+            status=str(d["status"]),
+            created_ts=int(d["created_ts"]),
+        )
+
+
+@dataclass(frozen=True)
+class TriggerOrder:
+    """A trigger order: ``stop_loss``, ``take_profit`` or ``stop`` (:attr:`trigger_type`).
+
+    ``rule`` is ``price_above_or_equal`` or ``price_below_or_equal``;
+    ``status`` is ``open``, ``finished``, ``inactive`` or ``invalid``.
+    ``size``, ``notional``, ``order_type``, ``client_id`` and ``created_ts``
+    are ``None`` when the venue did not report them.
+    """
+
+    id: str
+    instrument: str
+    trigger_type: str
+    trigger_price: Decimal
+    rule: str
+    size: Decimal | None
+    notional: Decimal | None
+    status: str
+    order_type: str | None
+    client_id: str | None
+    created_ts: int | None
+
+    @classmethod
+    def from_dict(cls, d: Mapping[str, Any]) -> TriggerOrder:
+        return cls(
+            id=str(d["id"]),
+            instrument=str(d["instrument"]),
+            trigger_type=str(d["type"]),
+            trigger_price=_decimal(d["trigger_price"]),
+            rule=str(d["rule"]),
+            size=_optional_decimal(d.get("size")),
+            notional=_optional_decimal(d.get("notional")),
+            status=str(d["status"]),
+            order_type=_optional_str(d.get("order_type")),
+            client_id=_optional_str(d.get("client_id")),
+            created_ts=_optional_int(d.get("created_ts")),
+        )
+
+
+@dataclass(frozen=True)
+class AccountOrders:
+    """``GET /v1/account/orders``: open orders and trigger orders of one connection."""
+
+    connection_id: int
+    data: list[Order]
+    triggers: list[TriggerOrder]
+
+    @classmethod
+    def from_dict(cls, d: Mapping[str, Any]) -> AccountOrders:
+        return cls(
+            connection_id=int(d["connection_id"]),
+            data=[Order.from_dict(item) for item in d.get("data") or ()],
+            triggers=[TriggerOrder.from_dict(item) for item in d.get("triggers") or ()],
+        )
+
+
+@dataclass(frozen=True)
+class Position:
+    """An open position. ``size`` is in the base coin (lots on MOEX, ``lot_size`` base units each).
+
+    ``notional`` is in the quote; ``unrealized_pnl`` and ``mark_price`` are
+    the terminal's own (best bid for a long, best ask for a short), ``None``
+    until the first book tick.
+    """
+
+    instrument: str
+    side: str
+    size: Decimal
+    lot_size: Decimal | None
+    entry_price: Decimal | None
+    notional: Decimal | None
+    unrealized_pnl: Decimal | None
+    mark_price: Decimal | None
+
+    @classmethod
+    def from_dict(cls, d: Mapping[str, Any]) -> Position:
+        return cls(
+            instrument=str(d["instrument"]),
+            side=str(d["side"]),
+            size=_decimal(d["size"]),
+            lot_size=_optional_decimal(d.get("lot_size")),
+            entry_price=_optional_decimal(d.get("entry_price")),
+            notional=_optional_decimal(d.get("notional")),
+            unrealized_pnl=_optional_decimal(d.get("unrealized_pnl")),
+            mark_price=_optional_decimal(d.get("mark_price")),
+        )
+
+
+@dataclass(frozen=True)
+class AccountPositions:
+    """``GET /v1/account/positions``: open positions of one connection."""
+
+    connection_id: int
+    data: list[Position]
+
+    @classmethod
+    def from_dict(cls, d: Mapping[str, Any]) -> AccountPositions:
+        return cls(
+            connection_id=int(d["connection_id"]),
+            data=[Position.from_dict(item) for item in d.get("data") or ()],
+        )
+
+
+@dataclass(frozen=True)
+class Balance:
+    """The latest balance of one currency.
+
+    ``available`` and ``locked`` are ``None`` when the venue does not report
+    them; ``ts`` is the exchange time where there is one, otherwise the
+    receive time.
+    """
+
+    currency: str
+    total: Decimal
+    available: Decimal | None
+    locked: Decimal | None
+    ts: int
+
+    @classmethod
+    def from_dict(cls, d: Mapping[str, Any]) -> Balance:
+        return cls(
+            currency=str(d["currency"]),
+            total=_decimal(d["total"]),
+            available=_optional_decimal(d.get("available")),
+            locked=_optional_decimal(d.get("locked")),
+            ts=int(d["ts"]),
+        )
+
+
+@dataclass(frozen=True)
+class AccountBalances:
+    """``GET /v1/account/balances``: per currency, the latest value since the API came on."""
+
+    connection_id: int
+    data: list[Balance]
+
+    @classmethod
+    def from_dict(cls, d: Mapping[str, Any]) -> AccountBalances:
+        return cls(
+            connection_id=int(d["connection_id"]),
+            data=[Balance.from_dict(item) for item in d.get("data") or ()],
+        )
+
+
+@dataclass(frozen=True)
+class Fill:
+    """One execution. ``position_side`` is ``long``/``short`` on hedged venues, else ``None``."""
+
+    trade_id: str | None
+    order_id: str | None
+    instrument: str
+    side: str
+    price: Decimal
+    qty: Decimal
+    fee: Decimal | None
+    fee_currency: str | None
+    position_side: str | None
+    ts: int
+
+    @classmethod
+    def from_dict(cls, d: Mapping[str, Any]) -> Fill:
+        return cls(
+            trade_id=_optional_str(d.get("trade_id")),
+            order_id=_optional_str(d.get("order_id")),
+            instrument=str(d["instrument"]),
+            side=str(d["side"]),
+            price=_decimal(d["price"]),
+            qty=_decimal(d["qty"]),
+            fee=_optional_decimal(d.get("fee")),
+            fee_currency=_optional_str(d.get("fee_currency")),
+            position_side=_optional_str(d.get("position_side")),
+            ts=int(d["ts"]),
+        )
+
+
+@dataclass(frozen=True)
+class AccountFills:
+    """``GET /v1/account/fills``: the connection's latest fills, oldest first."""
+
+    connection_id: int
+    data: list[Fill]
+
+    @classmethod
+    def from_dict(cls, d: Mapping[str, Any]) -> AccountFills:
+        return cls(
+            connection_id=int(d["connection_id"]),
+            data=[Fill.from_dict(item) for item in d.get("data") or ()],
+        )
+
+
+# --- POST /v1/orders, DELETE /v1/orders/{id}, cancel-all, positions/close ---------
+
+
+@dataclass(frozen=True)
+class Accepted:
+    """A trading command was accepted **by the terminal**, not yet by the exchange.
+
+    ``operation_id`` names the operation in the terminal's operations file;
+    ``key`` is the order key (``t-...``) under which the order will appear
+    in ``account.orders``, ``None`` for a cancellation. The exchange's
+    confirmation, fill or rejection arrives through the stream.
+    """
+
+    accepted: bool
+    operation_id: str
+    key: str | None
+    connection_id: int
+    instrument: str
+
+    @classmethod
+    def from_dict(cls, d: Mapping[str, Any]) -> Accepted:
+        return cls(
+            accepted=bool(d["accepted"]),
+            operation_id=str(d["operation_id"]),
+            key=_optional_str(d.get("key")),
+            connection_id=int(d["connection_id"]),
+            instrument=str(d["instrument"]),
+        )
+
+
+# --- account stream payloads ----------------------------------------------------
+
+
+@dataclass(frozen=True)
+class OrdersUpdate:
+    """An ``account.orders`` frame: orders and triggers of **one instrument** after a change."""
+
+    instrument: str
+    orders: list[Order]
+    triggers: list[TriggerOrder]
+
+    @classmethod
+    def from_dict(cls, d: Mapping[str, Any]) -> OrdersUpdate:
+        return cls(
+            instrument=str(d["instrument"]),
+            orders=[Order.from_dict(item) for item in d.get("orders") or ()],
+            triggers=[TriggerOrder.from_dict(item) for item in d.get("triggers") or ()],
+        )
+
+
+@dataclass(frozen=True)
+class PositionUpdate:
+    """An ``account.positions`` frame: one instrument's position; a close is ``position=None``."""
+
+    instrument: str
+    position: Position | None
+
+    @classmethod
+    def from_dict(cls, d: Mapping[str, Any]) -> PositionUpdate:
+        position = d.get("position")
+        return cls(
+            instrument=str(d["instrument"]),
+            position=None if position is None else Position.from_dict(position),
+        )
+
+
 # --- /v1/stream frames ------------------------------------------------------
 
 
 def topic_of(sub: str) -> str:
-    """The topic of a subscription id ``"{stream}:{topic}"``: ``"7:book.top"`` -> ``"book.top"``."""
+    """The topic of a subscription id: ``"7:book.top"`` -> ``"book.top"``.
+
+    Market subscriptions are ``"{stream}:{topic}"``, account ones
+    ``"{connection}:account.<topic>"``: ``"12:account.fills"`` -> ``"account.fills"``.
+    """
     _, _, topic = sub.partition(":")
     return topic
 
@@ -673,8 +997,11 @@ def parse_event_data(topic: str, data: Any) -> Any:
 
     ``trades`` -> ``list[Trade]``, ``ticker`` -> :class:`Ticker`,
     ``mark_price`` -> :class:`MarkPrice`, ``book.top`` -> :class:`BookTop`,
-    ``clusters`` -> :class:`Cluster`. A topic this client does not know is
-    passed through as decoded JSON, so a newer terminal still streams.
+    ``clusters`` -> :class:`Cluster`, ``account.orders`` ->
+    :class:`OrdersUpdate`, ``account.positions`` -> :class:`PositionUpdate`,
+    ``account.balances`` -> :class:`Balance`, ``account.fills`` ->
+    :class:`Fill`. A topic this client does not know is passed through as
+    decoded JSON, so a newer terminal still streams.
     """
     if topic == "trades":
         return [Trade.from_dict(item) for item in data or ()]
@@ -686,6 +1013,14 @@ def parse_event_data(topic: str, data: Any) -> Any:
         return BookTop.from_dict(data)
     if topic == "clusters":
         return Cluster.from_dict(data)
+    if topic == "account.orders":
+        return OrdersUpdate.from_dict(data)
+    if topic == "account.positions":
+        return PositionUpdate.from_dict(data)
+    if topic == "account.balances":
+        return Balance.from_dict(data)
+    if topic == "account.fills":
+        return Fill.from_dict(data)
     return data
 
 

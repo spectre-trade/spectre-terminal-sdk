@@ -15,6 +15,7 @@ import {
   StreamRequestError,
   Terminal,
   TerminalUnreachableError,
+  type AccountOrdersEvent,
   type Gap,
   type StreamFrame,
   type SubscriptionError,
@@ -24,6 +25,32 @@ import {
 
 const TOKEN = `spt_${"ef".repeat(32)}`;
 const TRADE = { id: null, price: "67000.1", qty: "0.012", side: "buy", ts: 1730294400125, exchange_ts: 1730294400119 };
+const ORDER = {
+  key: "t-123456789012345678",
+  exchange_id: "987654321",
+  instrument: "binance:futures:BTCUSDT",
+  side: "buy",
+  type: "limit",
+  price: "67000.1",
+  size: "0.012",
+  filled: "0",
+  remaining: "0.012",
+  notional: "804",
+  status: "open",
+  created_ts: 1730294400123,
+};
+const FILL = {
+  trade_id: "t1",
+  order_id: "987654321",
+  instrument: "binance:futures:BTCUSDT",
+  side: "buy",
+  price: "67000.1",
+  qty: "0.012",
+  fee: "0.32",
+  fee_currency: "USDT",
+  position_side: "long",
+  ts: 1730294400123,
+};
 
 let wss: WebSocketServer;
 let port: number;
@@ -46,8 +73,16 @@ function serve(socket: ServerSocket, request: Record<string, unknown>): void {
     send(socket, { type: "error", request_id: requestId, code: "invalid_request", message: "unknown request" });
     return;
   }
-  const instrument = String(request.instrument);
   const topic = String(request.topic);
+  if (topic.startsWith("account.")) {
+    serveAccount(socket, request, topic);
+    return;
+  }
+  if (typeof request.instrument !== "string") {
+    send(socket, { type: "error", request_id: requestId, code: "invalid_request", message: "instrument is required" });
+    return;
+  }
+  const instrument = request.instrument;
   if (instrument.startsWith("none:")) {
     send(socket, { type: "error", request_id: requestId, code: "not_found", message: "no connection for the instrument" });
     return;
@@ -74,6 +109,28 @@ function serve(socket: ServerSocket, request: Record<string, unknown>): void {
       ts: 1730294400132,
       data: { ts: 1730294400123, depth: 1, bids: [["67000.1", "1.25"]], asks: [["67000.2", "0.40"]] },
     });
+  }
+}
+
+/** Account topics: keyed by connection, `instrument` must be absent. */
+function serveAccount(socket: ServerSocket, request: Record<string, unknown>, topic: string): void {
+  const requestId = request.request_id;
+  if (typeof request.connection_id !== "number" || "instrument" in request) {
+    send(socket, { type: "error", request_id: requestId, code: "invalid_request", message: "connection_id, no instrument" });
+    return;
+  }
+  const sub = `${request.connection_id}:${topic}`;
+  send(socket, { type: "subscribed", request_id: requestId, sub, connection_id: request.connection_id });
+  if (topic === "account.orders") {
+    send(socket, {
+      type: "event",
+      sub,
+      seq: 5,
+      ts: 1730294400130,
+      data: { instrument: ORDER.instrument, orders: [ORDER], triggers: [] },
+    });
+  } else if (topic === "account.fills") {
+    send(socket, { type: "event", sub, seq: 1, ts: 1730294400131, data: FILL });
   }
 }
 
@@ -172,6 +229,58 @@ test("book.top passes params and yields a book frame", async () => {
   }
   assert.equal(stream.closed, true);
   assert.equal(stream.closeCode, 1000);
+});
+
+test("account topics send connection_id and no instrument; the sub id is {connection}:account.<topic>", async () => {
+  const stream = await terminal().stream();
+
+  const fills = await stream.subscribe({ topic: "account.fills", connectionId: 12 });
+  assert.equal(fills.sub, "12:account.fills");
+  assert.equal(fills.topic, "account.fills");
+  assert.equal(fills.connection_id, 12);
+  assert.equal(fills.instrument, undefined);
+  assert.ok(!("instrument" in fills));
+  const request = received.at(-1)!;
+  assert.equal(request.topic, "account.fills");
+  assert.equal(request.connection_id, 12);
+  assert.ok(!("instrument" in request));
+
+  // An instrument given with an account topic is dropped, not sent.
+  const orders = await stream.subscribe({ topic: "account.orders", connectionId: 12, instrument: "binance:futures:BTCUSDT" });
+  assert.equal(orders.sub, "12:account.orders");
+  assert.ok(!("instrument" in received.at(-1)!));
+
+  const frames = await take(stream[Symbol.asyncIterator](), 2);
+  const fill = frames[0]!;
+  assert.ok(fill.type === "event" && fill.topic === "account.fills");
+  assert.equal(fill.data.trade_id, "t1");
+  assert.equal(fill.data.position_side, "long");
+
+  const update = frames[1] as AccountOrdersEvent;
+  assert.equal(update.type, "event");
+  assert.equal(update.topic, "account.orders");
+  assert.equal(update.sub, "12:account.orders");
+  assert.equal(update.seq, 5);
+  assert.equal(update.data.instrument, "binance:futures:BTCUSDT");
+  assert.equal(update.data.orders[0]?.key, "t-123456789012345678");
+  assert.deepEqual(update.data.triggers, []);
+
+  // Narrowing by topic in a loop, as a consumer writes it.
+  for (const frame of frames) {
+    if (frame.type === "event" && frame.topic === "account.orders") {
+      assert.equal(frame.data.orders.length, 1);
+    } else if (frame.type === "event" && frame.topic === "account.fills") {
+      assert.equal(frame.data.qty, "0.012");
+    } else {
+      assert.fail(`unexpected frame ${JSON.stringify(frame)}`);
+    }
+  }
+
+  // A market topic without an instrument is the server's error, not the client's.
+  const error = await stream.subscribe({ topic: "trades", connectionId: 12 }).catch((e: unknown) => e);
+  assert.ok(error instanceof StreamRequestError);
+  assert.equal(error.code, "invalid_request");
+  await stream.close();
 });
 
 test("a subscribe error rejects with StreamRequestError and leaves the stream usable", async () => {
@@ -287,6 +396,12 @@ test("StreamProtocol classifies events, gaps and subscription errors", () => {
     const frame = protocol.route({ type: "event", sub: `7:${topic}`, seq: 1, ts: 1, data: {} });
     assert.ok(frame && frame.type === "event");
     assert.equal(frame.topic, topic);
+  }
+  for (const topic of ["account.orders", "account.positions", "account.balances", "account.fills"] as Topic[]) {
+    const frame = protocol.route({ type: "event", sub: `12:${topic}`, seq: 1, ts: 1, data: {} });
+    assert.ok(frame && frame.type === "event");
+    assert.equal(frame.topic, topic);
+    assert.equal(frame.sub, `12:${topic}`);
   }
 
   const unknown = protocol.route({ type: "event", sub: "7:future_topic", seq: 1, ts: 1, data: {} });

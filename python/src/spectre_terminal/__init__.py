@@ -6,7 +6,8 @@
     for connection in terminal.connections():
         print(connection.id, connection.exchange, connection.market, connection.status.state)
 
-The public surface is :class:`Terminal` (HTTP), :class:`Stream` (WebSocket),
+The public surface is :class:`Terminal` (HTTP: market data, the account and
+trading commands), :class:`Stream` (WebSocket),
 the models of :mod:`spectre_terminal.models`, the errors of
 :mod:`spectre_terminal.errors` and the discovery helpers of
 :mod:`spectre_terminal.discovery`. Importing the package touches no network.
@@ -14,7 +15,7 @@ the models of :mod:`spectre_terminal.models`, the errors of
 
 from __future__ import annotations
 
-from .client import API_VERSION, Terminal
+from .client import API_VERSION, Money, Terminal
 from .discovery import DEFAULT_HOST, DEFAULT_PORT, TOKEN_ENV, instance_path, read_port
 from .errors import (
     ApiError,
@@ -27,6 +28,12 @@ from .errors import (
     TokenMissing,
 )
 from .models import (
+    Accepted,
+    AccountBalances,
+    AccountFills,
+    AccountOrders,
+    AccountPositions,
+    Balance,
     BookTop,
     Candle,
     Candles,
@@ -36,6 +43,7 @@ from .models import (
     Connection,
     ConnectionStatus,
     Event,
+    Fill,
     Gap,
     Health,
     Instrument,
@@ -46,14 +54,19 @@ from .models import (
     Limits,
     MarkPrice,
     Meta,
+    Order,
     OrderBook,
+    OrdersUpdate,
     Page,
+    Position,
+    PositionUpdate,
     Snapshot,
     Subscribed,
     SubscriptionError,
     Ticker,
     Trade,
     Trades,
+    TriggerOrder,
     Unsubscribed,
 )
 from .stream import Stream
@@ -65,7 +78,13 @@ __all__ = [
     "DEFAULT_HOST",
     "DEFAULT_PORT",
     "TOKEN_ENV",
+    "Accepted",
+    "AccountBalances",
+    "AccountFills",
+    "AccountOrders",
+    "AccountPositions",
     "ApiError",
+    "Balance",
     "BookTop",
     "Candle",
     "Candles",
@@ -75,6 +94,7 @@ __all__ = [
     "Connection",
     "ConnectionStatus",
     "Event",
+    "Fill",
     "Gap",
     "Health",
     "IncompatibleTerminal",
@@ -87,8 +107,13 @@ __all__ = [
     "LocalApiDisabled",
     "MarkPrice",
     "Meta",
+    "Money",
+    "Order",
     "OrderBook",
+    "OrdersUpdate",
     "Page",
+    "Position",
+    "PositionUpdate",
     "Snapshot",
     "SpectreTerminalError",
     "Stream",
@@ -102,6 +127,7 @@ __all__ = [
     "TokenMissing",
     "Trade",
     "Trades",
+    "TriggerOrder",
     "Unsubscribed",
     "__version__",
     "instance_path",

@@ -56,6 +56,24 @@ clients can call them without asking the user each time.
 | `recent_trades_summary` | `instrument`, `limit` (200, ≤ 1000), optional `connection_id` | count by side, buy and sell volume, delta, VWAP, low and high, first and last price, time span, the largest print |
 | `cluster_summary` | `instrument`, `buckets` (3, ≤ 10), `top_levels` (5, ≤ 20), optional `connection_id` | newest buckets at the terminal's interval: volume by side, delta, VWAP, range, trades, the busiest price levels |
 | `candles` | `instrument`, `interval` (`1m`), `limit` (50, ≤ 500), optional `end`, `connection_id` | OHLCV bars as compact rows under a `columns` header, oldest first |
+| `account_overview` | `connection_id` | balances, open positions with PnL, and the count of open orders and triggers per instrument |
+| `open_orders` | `connection_id`, optional `instrument` | open orders and trigger orders, the terminal's `key` and the exchange id for each |
+| `recent_fills` | `connection_id`, `limit` (20, ≤ 200), optional `since_ts` | the latest fills, newest last, with a buy/sell volume total |
+
+Trading tools, **not** read-only (annotated `destructive_hint`, so an MCP
+client may ask the user before each call):
+
+| Tool | Arguments | Does |
+| --- | --- | --- |
+| `place_order` | `connection_id`, `instrument`, `side`, `type`, optional `price`, `size` or `notional`, `reduce_only`, `post_only`, `time_in_force`, `client_key` | places a limit or market order; answers with the terminal's order `key` |
+| `cancel_order` | `connection_id`, `instrument`, `order_id` | cancels one order by terminal key or exchange id |
+| `cancel_all_orders` | `connection_id`, `instrument` | cancels every order of the instrument |
+| `close_position` | `connection_id`, `instrument` | closes the instrument's position the way the window does |
+
+Every trading answer is `accepted`, not filled: the exchange's outcome shows
+up in `open_orders` and `recent_fills`. The model is told so in the tool
+descriptions, and `place_order` requires `client_key` so that a retried call
+never doubles an order.
 
 Every tool that takes an instrument names the connection it used in the
 answer. Prices and sizes are decimal strings and should be kept as strings;
@@ -88,9 +106,11 @@ The token never appears in any message.
 
 ## What it does not do
 
-- No writing: no orders, no settings, no windows. The API has no write path
-  in v1, and a trading tool for an agent needs a product decision on
-  confirmation first.
+- No settings and no windows. Of trading, only plain orders, cancellation
+  and closing a position — trigger orders and leverage come with later
+  terminal stages. There is no confirmation inside the server: the Local API
+  toggle in the terminal is the consent and the kill switch (product
+  decision); MCP clients that confirm destructive tools do so on their own.
 - No streaming: MCP tools are request and response. An agent that needs live
   data polls `market_snapshot`; a program that needs live data uses the SDK
   stream.

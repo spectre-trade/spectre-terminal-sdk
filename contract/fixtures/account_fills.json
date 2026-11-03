@@ -1,0 +1,17 @@
+{
+  "connection_id": 12,
+  "data": [
+    {
+      "trade_id": "t1",
+      "order_id": "987654321",
+      "instrument": "binance:futures:BTCUSDT",
+      "side": "buy",
+      "price": "67000.1",
+      "qty": "0.012",
+      "fee": "0.32",
+      "fee_currency": "USDT",
+      "position_side": "long",
+      "ts": 1730294400123
+    }
+  ]
+}

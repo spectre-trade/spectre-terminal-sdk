@@ -16,15 +16,23 @@ from .tools import register_tools
 __all__ = ["build_server", "main"]
 
 INSTRUCTIONS = """\
-Read-only view of a running Spectre Terminal on this machine: exchange
-connections, instrument catalogue, last price and top of book, recent trades,
-volume clusters and candles — the same data the trader sees in the terminal.
+A running Spectre Terminal on this machine: exchange connections, instrument
+catalogue, last price and top of book, recent trades, volume clusters,
+candles, the account (orders, positions, balances, fills) and order placement
+— the same data and the same commands the trader has in the terminal.
 
 Instruments are addressed as "exchange:market:symbol" in the exchange's own
 spelling, for example "binance:futures:BTCUSDT" or "okx:futures:ETH-USDT-SWAP".
 When unsure of the spelling, call find_instrument first. Prices and sizes are
 decimal strings; keep them as strings. Times are UTC milliseconds with an ISO
-twin. Nothing here places orders or changes the terminal.
+twin.
+
+Trading tools (place_order, cancel_order, cancel_all_orders, close_position)
+send real commands to the exchange through the terminal and answer "accepted
+by the terminal", not "filled": read open_orders and recent_fills for the
+outcome. Always pass a client_key to place_order so a retry never doubles an
+order, and name the connection explicitly — every account tool works on one
+connection at a time.
 """
 
 

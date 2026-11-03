@@ -13,6 +13,10 @@ from decimal import ROUND_HALF_UP, Decimal
 from typing import Any
 
 from spectre_terminal.models import (
+    AccountBalances,
+    AccountFills,
+    AccountOrders,
+    AccountPositions,
     Candles,
     Cluster,
     Clusters,
@@ -27,7 +31,10 @@ from spectre_terminal.models import (
 )
 
 __all__ = [
+    "account_overview",
     "book_summary",
+    "fills_summary",
+    "open_orders_summary",
     "candle_rows",
     "cluster_summary",
     "connection_row",
@@ -287,5 +294,114 @@ def candle_rows(candles: Candles) -> dict[str, Any]:
                 candle.closed,
             ]
             for candle in candles.data
+        ],
+    }
+
+
+def _order_row(order: Any) -> dict[str, Any]:
+    return {
+        "key": order.key,
+        "exchange_id": order.exchange_id,
+        "instrument": order.instrument,
+        "side": order.side,
+        "type": order.order_type,
+        "price": dec(order.price),
+        "size": dec(order.size),
+        "filled": dec(order.filled),
+        "remaining": dec(order.remaining),
+        "status": order.status,
+        "created_ts": order.created_ts,
+        "created_time": iso(order.created_ts),
+    }
+
+
+def _trigger_row(trigger: Any) -> dict[str, Any]:
+    return {
+        "id": trigger.id,
+        "instrument": trigger.instrument,
+        "type": trigger.trigger_type,
+        "trigger_price": dec(trigger.trigger_price),
+        "rule": trigger.rule,
+        "size": dec(trigger.size),
+        "notional": dec(trigger.notional),
+        "status": trigger.status,
+    }
+
+
+def open_orders_summary(orders: AccountOrders, instrument: str | None = None) -> dict[str, Any]:
+    """Open orders and triggers, optionally of one instrument, with the keys needed to cancel."""
+    rows = [o for o in orders.data if instrument is None or o.instrument == instrument]
+    triggers = [t for t in orders.triggers if instrument is None or t.instrument == instrument]
+    return {
+        "connection_id": orders.connection_id,
+        "instrument": instrument,
+        "orders": [_order_row(o) for o in rows],
+        "triggers": [_trigger_row(t) for t in triggers],
+    }
+
+
+def account_overview(
+    balances: AccountBalances, positions: AccountPositions, orders: AccountOrders
+) -> dict[str, Any]:
+    """Balances, positions and the number of open orders per instrument in one answer."""
+    counts: dict[str, dict[str, int]] = {}
+    for order in orders.data:
+        counts.setdefault(order.instrument, {"orders": 0, "triggers": 0})["orders"] += 1
+    for trigger in orders.triggers:
+        counts.setdefault(trigger.instrument, {"orders": 0, "triggers": 0})["triggers"] += 1
+    return {
+        "connection_id": balances.connection_id,
+        "balances": [
+            {
+                "currency": b.currency,
+                "total": dec(b.total),
+                "available": dec(b.available),
+                "locked": dec(b.locked),
+            }
+            for b in balances.data
+        ],
+        "positions": [
+            {
+                "instrument": p.instrument,
+                "side": p.side,
+                "size": dec(p.size),
+                "entry_price": dec(p.entry_price),
+                "notional": dec(p.notional),
+                "unrealized_pnl": dec(p.unrealized_pnl),
+                "mark_price": dec(p.mark_price),
+            }
+            for p in positions.data
+        ],
+        "open_orders": [
+            {"instrument": instrument, **count} for instrument, count in sorted(counts.items())
+        ],
+        "open_orders_total": len(orders.data),
+        "triggers_total": len(orders.triggers),
+    }
+
+
+def fills_summary(fills: AccountFills) -> dict[str, Any]:
+    """Fills oldest first plus buy and sell volume totals."""
+    buy = sum((f.qty for f in fills.data if f.side == "buy"), Decimal(0))
+    sell = sum((f.qty for f in fills.data if f.side == "sell"), Decimal(0))
+    return {
+        "connection_id": fills.connection_id,
+        "count": len(fills.data),
+        "buy_volume": dec(buy),
+        "sell_volume": dec(sell),
+        "fills": [
+            {
+                "trade_id": f.trade_id,
+                "order_id": f.order_id,
+                "instrument": f.instrument,
+                "side": f.side,
+                "price": dec(f.price),
+                "qty": dec(f.qty),
+                "fee": dec(f.fee),
+                "fee_currency": f.fee_currency,
+                "ts": f.ts,
+                "time": iso(f.ts),
+            }
+            for f in fills.data
         ],
     }

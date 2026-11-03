@@ -1,10 +1,15 @@
 #!/usr/bin/env python3
-"""Live smoke check: every operation of the contract once, plus a short stream.
+"""Live smoke check: every read operation of the contract once, plus a short stream.
 
 Usage: ``smoke.py [exchange:market:SYMBOL]`` (default ``binance:futures:ETHUSDT``)
 with a running terminal, the Local API switched on and the token in
 ``SPECTRE_LOCAL_API_TOKEN``. Prints one ``PASS``/``FAIL`` line per operation
 and exits non-zero if any failed. The token is never printed.
+
+The account reads run against the first connection that trades (enabled,
+with credentials, not read-only) and are skipped without one. Nothing is
+placed or cancelled: the trading commands are exercised by
+``place_and_cancel.py`` on purpose, on an account of your choosing.
 """
 
 from __future__ import annotations
@@ -96,6 +101,39 @@ def main() -> int:
         print(
             f"     {len(connections)} connection(s): "
             + ", ".join(f"{c.id}={c.exchange}:{c.market}:{c.status.state}" for c in connections)
+        )
+
+    tradable = next(
+        (c for c in connections or () if c.enabled and c.has_credentials and not c.read_only),
+        None,
+    )
+    if tradable is None:
+        print("SKIP account_*: no connection trades (enabled, with credentials, not read-only)")
+    else:
+        cid = tradable.id
+        print(f"     account reads on connection {cid} ({tradable.exchange}:{tradable.market})")
+        check(
+            "account_orders",
+            lambda: (lambda o: f"{len(o.data)} order(s), {len(o.triggers)} trigger(s)")(
+                terminal.account_orders(cid)
+            ),
+        )
+        check(
+            "account_positions",
+            lambda: f"{len(terminal.account_positions(cid).data)} position(s)",
+        )
+        check(
+            "account_balances",
+            lambda: (
+                lambda b: (
+                    f"{len(b.data)} currency(ies): "
+                    + ", ".join(f"{x.currency}={x.total}" for x in b.data[:5])
+                )
+            )(terminal.account_balances(cid)),
+        )
+        check(
+            "account_fills",
+            lambda: f"{len(terminal.account_fills(cid, limit=20).data)} fill(s)",
         )
 
     pair = {"exchange": exchange, "market": market}

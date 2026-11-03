@@ -19,13 +19,16 @@ clients add the header for you and never put the token into error messages,
 
 | Scope | Grants |
 | --- | --- |
-| `market:read` | catalogue, candles, intervals, trades, snapshot, order book, clusters, the stream |
+| `market:read` | catalogue, candles, intervals, trades, snapshot, order book, clusters, the market topics of the stream |
 | `connections:read` | `/v1/connections` |
+| `account:read` | `/v1/account/*` and the `account.*` stream topics |
+| `trading:write` | `/v1/orders`, `/v1/orders/cancel-all`, `/v1/positions/close` |
 
-`/v1/meta` and `/v1/health` need any valid token. Both scopes are granted to
-the token today; `meta().scopes` tells you which ones a token has, and a
-missing scope answers `403 forbidden_scope`. Future scopes (account data,
-trading) will be separate decisions and separate switches in the terminal.
+`/v1/meta` and `/v1/health` need any valid token. All four scopes are
+granted: there is no separate write switch, the Local API toggle is the one
+consent and the one kill switch (a product decision). `meta().scopes` tells
+you what a token has; a terminal older than a scope simply does not list it,
+and a missing scope answers `403 forbidden_scope`.
 
 ## Refusals
 

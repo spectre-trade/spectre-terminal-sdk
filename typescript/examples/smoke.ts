@@ -1,5 +1,8 @@
-// Live smoke check: call every operation once plus a short stream, print one
-// PASS/FAIL line per operation, exit 1 if anything failed.
+// Live smoke check: call every read operation once plus a short stream, print
+// one PASS/FAIL line per operation, exit 1 if anything failed. Nothing here
+// places an order: the account reads go to the first connection that trades
+// (enabled, with credentials, not read-only) and are skipped without one;
+// the writes are exercised by `examples/place-and-cancel.ts` on purpose.
 //
 // Runs from a checkout without a build:
 //   node examples/smoke.ts [exchange:market:SYMBOL]
@@ -59,9 +62,11 @@ await step("health", async () => {
 });
 
 let firstConnectionId: number | undefined;
+let tradableConnectionId: number | undefined;
 await step("connections", async () => {
   const { data } = await t.connections();
   firstConnectionId = data[0]?.id;
+  tradableConnectionId = data.find((c) => c.enabled && c.has_credentials && !c.read_only)?.id;
   return `${data.length} connections: ${data.map((c) => `${c.exchange}:${c.market}=${c.status.state}`).join(", ")}`;
 });
 
@@ -132,6 +137,41 @@ await step("clusters", async () => {
   }
   const last = clusters.data.at(-1);
   return `${clusters.data.length} buckets of ${clusters.interval}${last ? `, last volume ${last.volume} over ${last.levels.length} levels` : ""}`;
+});
+
+const SKIP_ACCOUNT = "skipped: no enabled trading connection";
+
+await step("accountOrders", async () => {
+  if (tradableConnectionId === undefined) {
+    return SKIP_ACCOUNT;
+  }
+  const orders = await t.accountOrders(tradableConnectionId);
+  return `connection #${orders.connection_id}: ${orders.data.length} open orders, ${orders.triggers.length} triggers`;
+});
+
+await step("accountPositions", async () => {
+  if (tradableConnectionId === undefined) {
+    return SKIP_ACCOUNT;
+  }
+  const positions = await t.accountPositions(tradableConnectionId);
+  return `${positions.data.length} positions${positions.data[0] ? `, first ${positions.data[0].instrument} ${positions.data[0].side} ${positions.data[0].size}` : ""}`;
+});
+
+await step("accountBalances", async () => {
+  if (tradableConnectionId === undefined) {
+    return SKIP_ACCOUNT;
+  }
+  const balances = await t.accountBalances(tradableConnectionId);
+  return `${balances.data.length} currencies${balances.data[0] ? `, first ${balances.data[0].currency} ${balances.data[0].total}` : ""}`;
+});
+
+await step("accountFills", async () => {
+  if (tradableConnectionId === undefined) {
+    return SKIP_ACCOUNT;
+  }
+  const fills = await t.accountFills(tradableConnectionId, { limit: 10 });
+  const last = fills.data.at(-1);
+  return `${fills.data.length} fills${last ? `, last ${last.instrument} ${last.side} ${last.qty} @ ${last.price}` : ""}`;
 });
 
 let stream: Stream | undefined;

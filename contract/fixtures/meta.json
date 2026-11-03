@@ -4,12 +4,18 @@
   "build_hash": "unknown",
   "build_env": "development",
   "features": "unknown",
-  "scopes": ["market:read", "connections:read"],
+  "scopes": [
+    "market:read",
+    "connections:read",
+    "account:read",
+    "trading:write"
+  ],
   "limits": {
     "ws_connections_per_token": 8,
     "subscriptions_per_connection": 100,
     "api_only_instruments": 50,
-    "exchange_subscriptions_per_second": 5
+    "exchange_subscriptions_per_second": 5,
+    "commands_per_second": 10
   },
   "topics": []
 }

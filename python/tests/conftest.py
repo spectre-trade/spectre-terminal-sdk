@@ -3,8 +3,8 @@
 The fake listener is a stdlib ``http.server`` on a random loopback port that
 serves the fixtures from ``../contract/fixtures``, enforces the token and the
 ``Origin`` rule the way the terminal does, and records every request so
-tests can assert URLs, query strings and headers. No real terminal, no
-network beyond loopback.
+tests can assert methods, URLs, query strings, headers and JSON bodies. No
+real terminal, no network beyond loopback, and no order ever leaves it.
 """
 
 from __future__ import annotations
@@ -37,11 +37,13 @@ def error_body(code: str, message: str = "") -> dict[str, Any]:
 
 @dataclass
 class Recorded:
-    """One request the fake listener saw."""
+    """One request the fake listener saw. ``body`` is the decoded JSON body, ``None`` without."""
 
     path: str
     query: dict[str, list[str]]
     headers: dict[str, str]
+    method: str = "GET"
+    body: Any = None
 
 
 @dataclass
@@ -55,6 +57,15 @@ class Override:
 
 
 SECOND_PAGE_CURSOR = "page2"
+CONNECTION_ID = 12
+"""The one connection the fixtures know."""
+
+ACCOUNT_ROUTES = {
+    "/v1/account/orders": "account_orders",
+    "/v1/account/positions": "account_positions",
+    "/v1/account/balances": "account_balances",
+    "/v1/account/fills": "account_fills",
+}
 
 
 def _second_page() -> dict[str, Any]:
@@ -82,6 +93,12 @@ class FakeTerminal:
             def do_GET(self) -> None:  # noqa: N802 - http.server naming
                 fake._handle(self)
 
+            def do_POST(self) -> None:  # noqa: N802 - http.server naming
+                fake._handle(self)
+
+            def do_DELETE(self) -> None:  # noqa: N802 - http.server naming
+                fake._handle(self)
+
         self.server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
         self.port: int = self.server.server_address[1]
         self._thread = threading.Thread(target=self.server.serve_forever, daemon=True)
@@ -104,8 +121,15 @@ class FakeTerminal:
     def _handle(self, handler: BaseHTTPRequestHandler) -> None:
         parts = urlsplit(handler.path)
         headers = {key: value for key, value in handler.headers.items()}
-        self.requests.append(Recorded(parts.path, parse_qs(parts.query), headers))
-        status, body, extra = self._answer(parts.path, parse_qs(parts.query), headers)
+        length = int(headers.get("Content-Length") or 0)
+        raw = handler.rfile.read(length) if length else b""
+        body_in = json.loads(raw) if raw else None
+        self.requests.append(
+            Recorded(parts.path, parse_qs(parts.query), headers, handler.command, body_in)
+        )
+        status, body, extra = self._answer(
+            handler.command, parts.path, parse_qs(parts.query), headers, body_in
+        )
         if isinstance(body, bytes):
             payload = body
             content_type = "text/plain"
@@ -121,7 +145,12 @@ class FakeTerminal:
         handler.wfile.write(payload)
 
     def _answer(
-        self, path: str, query: dict[str, list[str]], headers: dict[str, str]
+        self,
+        method: str,
+        path: str,
+        query: dict[str, list[str]],
+        headers: dict[str, str],
+        body_in: Any,
     ) -> tuple[int, Any, dict[str, str]]:
         if "Origin" in headers:
             return 403, error_body("forbidden", "requests from browser pages are not accepted"), {}
@@ -135,6 +164,10 @@ class FakeTerminal:
         if override is not None:
             body = override.raw if override.raw is not None else override.body
             return override.status, body, override.headers
+        if path.startswith("/v1/account/"):
+            return self._account(path, query)
+        if path.startswith("/v1/orders") or path == "/v1/positions/close":
+            return self._trading(method, path, query, body_in)
         if path == "/v1/instruments":
             cursor = query.get("cursor", [None])[0]
             if cursor == SECOND_PAGE_CURSOR:
@@ -159,6 +192,37 @@ class FakeTerminal:
         if name is None:
             return 404, load_fixture("error"), {}
         return 200, load_fixture(name), {}
+
+    @staticmethod
+    def _account(path: str, query: dict[str, list[str]]) -> tuple[int, Any, dict[str, str]]:
+        """``/v1/account/*``: ``connection_id`` is required and only ``12`` exists."""
+        if query.get("connection_id") != [str(CONNECTION_ID)]:
+            return 404, error_body("not_found", "no such connection"), {}
+        name = ACCOUNT_ROUTES.get(path)
+        if name is None:
+            return 404, load_fixture("error"), {}
+        return 200, load_fixture(name), {}
+
+    @staticmethod
+    def _trading(
+        method: str, path: str, query: dict[str, list[str]], body_in: Any
+    ) -> tuple[int, Any, dict[str, str]]:
+        """``POST /v1/orders``, ``DELETE /v1/orders/{id}``, cancel-all and close: ``accepted``."""
+        accepted = load_fixture("accepted")
+        if method == "POST" and path == "/v1/orders":
+            if not isinstance(body_in, dict) or body_in.get("connection_id") != CONNECTION_ID:
+                return 404, error_body("not_found", "no such connection"), {}
+            return 200, {**accepted, "instrument": body_in.get("instrument")}, {}
+        if method == "DELETE" and path.startswith("/v1/orders/"):
+            if query.get("connection_id") != [str(CONNECTION_ID)]:
+                return 404, error_body("not_found", "no such connection"), {}
+            instrument = query.get("instrument", [accepted["instrument"]])[0]
+            return 200, {**accepted, "key": None, "instrument": instrument}, {}
+        if method == "POST" and path in ("/v1/orders/cancel-all", "/v1/positions/close"):
+            if not isinstance(body_in, dict) or body_in.get("connection_id") != CONNECTION_ID:
+                return 404, error_body("not_found", "no such connection"), {}
+            return 200, {**accepted, "key": None, "instrument": body_in.get("instrument")}, {}
+        return 404, load_fixture("error"), {}
 
 
 @pytest.fixture

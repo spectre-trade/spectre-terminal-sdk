@@ -50,6 +50,12 @@ def brief(name: str, data: dict[str, Any]) -> str:
     if name == "candles":
         last_close = data["rows"][-1][5] if data["rows"] else "-"
         return f"{len(data['rows'])} rows, last close {last_close}"
+    if name == "account_overview":
+        return f"{len(data['balances'])} balances, {len(data['positions'])} positions"
+    if name == "open_orders":
+        return f"{len(data['orders'])} orders, {len(data['triggers'])} triggers"
+    if name == "recent_fills":
+        return f"{data['count']} fills"
     return json.dumps(data)[:80]
 
 
@@ -67,7 +73,25 @@ async def main() -> int:
             listed = await session.list_tools()
             names = sorted(tool.name for tool in listed.tools)
             print(f"PASS list_tools: {len(names)} tools: {', '.join(names)}")
-            for name, arguments, key in CALLS:
+            status = await session.call_tool("terminal_status", {})
+            tradable = next(
+                (
+                    c["id"]
+                    for c in (status.structured_content or {}).get("connections", [])
+                    if c.get("enabled") and not c.get("read_only")
+                ),
+                None,
+            )
+            calls = list(CALLS)
+            if tradable is None:
+                print("SKIP account tools: no trading connection")
+            else:
+                calls += [
+                    ("account_overview", {"connection_id": tradable}, "balances"),
+                    ("open_orders", {"connection_id": tradable}, "orders"),
+                    ("recent_fills", {"connection_id": tradable, "limit": 5}, "fills"),
+                ]
+            for name, arguments, key in calls:
                 started = time.monotonic()
                 result = await session.call_tool(name, arguments)
                 elapsed = (time.monotonic() - started) * 1000

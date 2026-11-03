@@ -14,7 +14,7 @@ import { test } from "node:test";
 const FIXTURES = new URL("../../contract/fixtures/", import.meta.url);
 
 /** Scalar kinds; a trailing `?` allows `null`. */
-type Kind = "string" | "decimal" | "int" | "bool" | "side" | "state";
+type Kind = "string" | "decimal" | "int" | "bool" | "side" | "position_side" | "state";
 
 /** A spec: a kind, an object shape (a key ending in `?` may be absent), an array of, a pair, or nullable. */
 type Spec =
@@ -56,6 +56,9 @@ function checkKind(value: unknown, kind: Kind, path: string, failures: string[])
       break;
     case "side":
       if (value !== "buy" && value !== "sell") fail('"buy" or "sell"');
+      break;
+    case "position_side":
+      if (value !== "long" && value !== "short") fail('"long" or "short"');
       break;
     case "state":
       if (typeof value !== "string" || !STATES.has(value)) fail("a connection state");
@@ -121,6 +124,9 @@ const limits = {
   subscriptions_per_connection: "int",
   api_only_instruments: "int",
   exchange_subscriptions_per_second: "int",
+  // Optional in types.ts only for terminals older than the writing stage;
+  // the fixture is the current terminal's answer and must carry it.
+  commands_per_second: "int",
 } as const;
 
 const meta = {
@@ -280,6 +286,83 @@ const clusters = {
   data: [clusterBucket],
 } as const;
 
+const order = {
+  key: "string?",
+  exchange_id: "string?",
+  instrument: "string",
+  side: "side",
+  type: "string",
+  price: "decimal",
+  size: "decimal",
+  filled: "decimal",
+  remaining: "decimal",
+  notional: "decimal?",
+  status: "string",
+  created_ts: "int",
+} as const;
+
+const triggerOrder = {
+  id: "string",
+  instrument: "string",
+  type: "string",
+  trigger_price: "decimal",
+  rule: "string",
+  size: "decimal?",
+  notional: "decimal?",
+  status: "string",
+  order_type: "string?",
+  client_id: "string?",
+  created_ts: "int?",
+} as const;
+
+const accountOrders = { connection_id: "int", data: [order], triggers: [triggerOrder] } as const;
+
+const position = {
+  instrument: "string",
+  side: "position_side",
+  size: "decimal",
+  lot_size: "decimal",
+  entry_price: "decimal",
+  notional: "decimal",
+  unrealized_pnl: "decimal",
+  mark_price: "decimal?",
+} as const;
+
+const accountPositions = { connection_id: "int", data: [position] } as const;
+
+const balance = {
+  currency: "string",
+  total: "decimal",
+  available: "decimal?",
+  locked: "decimal?",
+  ts: "int",
+} as const;
+
+const accountBalances = { connection_id: "int", data: [balance] } as const;
+
+const fill = {
+  trade_id: "string",
+  order_id: "string",
+  instrument: "string",
+  side: "side",
+  price: "decimal",
+  qty: "decimal",
+  fee: "decimal",
+  fee_currency: "string",
+  position_side: "position_side?",
+  ts: "int",
+} as const;
+
+const accountFills = { connection_id: "int", data: [fill] } as const;
+
+const accepted = {
+  accepted: "bool",
+  operation_id: "string",
+  key: "string?",
+  connection_id: "int",
+  instrument: "string",
+} as const;
+
 const errorEnvelope = { error: { code: "string", message: "string" } } as const;
 
 /** Fixture file → the shape it must match. One entry per operation. */
@@ -295,6 +378,11 @@ const SHAPES: Record<string, Spec> = {
   "snapshot.json": snapshot,
   "orderbook.json": orderbook,
   "clusters.json": clusters,
+  "account_orders.json": accountOrders,
+  "account_positions.json": accountPositions,
+  "account_balances.json": accountBalances,
+  "account_fills.json": accountFills,
+  "accepted.json": accepted,
   "error.json": errorEnvelope,
 };
 
@@ -311,6 +399,11 @@ for (const [file, spec] of Object.entries(SHAPES)) {
     assert.deepEqual(failures, []);
   });
 }
+
+test("meta.json names the four scopes", async () => {
+  const fixture = JSON.parse(await readFile(new URL("meta.json", FIXTURES), "utf8")) as { scopes: string[] };
+  assert.deepEqual([...fixture.scopes].sort(), ["account:read", "connections:read", "market:read", "trading:write"]);
+});
 
 test("the checker itself catches a missing, an unknown and a mistyped field", () => {
   const failures: string[] = [];

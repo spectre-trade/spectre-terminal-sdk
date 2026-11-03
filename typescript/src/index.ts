@@ -7,6 +7,7 @@
  *
  * const terminal = await Terminal.discover();
  * const snapshot = await terminal.snapshot("binance:futures:BTCUSDT");
+ * const { data: orders } = await terminal.accountOrders(12);
  * ```
  *
  * @module
@@ -14,11 +15,15 @@
 
 export { Terminal, SUPPORTED_API_VERSION } from "./client.ts";
 export type {
+  AccountFillsOptions,
+  CancelOrderOptions,
   CandlesOptions,
   ConnectionOptions,
   DiscoverOptions,
+  InstrumentCommandOptions,
   InstrumentsOptions,
   OrderbookOptions,
+  PlaceOrderOptions,
   StreamOptions,
   TerminalOptions,
   TradesOptions,

@@ -1,7 +1,7 @@
 {
   "name": "@spectre-trade/terminal",
   "version": "0.1.0",
-  "description": "TypeScript client for the Local API of Spectre Terminal: connections, instruments, trades, order books, clusters and candles over HTTP and WebSocket on 127.0.0.1",
+  "description": "TypeScript client for the Local API of Spectre Terminal: connections, instruments, trades, order books, clusters, candles, the account and order placement over HTTP and WebSocket on 127.0.0.1",
   "keywords": [
     "spectre",
     "trading",

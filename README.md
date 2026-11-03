@@ -1,9 +1,9 @@
 # Spectre Terminal SDK
 
 Clients for the **Local API** of [Spectre Terminal](https://spectre.trade):
-read connections, the instrument catalogue, trades, order books, clusters and
-candles from a running terminal on the same machine, over HTTP and WebSocket
-on `127.0.0.1`.
+read connections, the instrument catalogue, trades, order books, clusters,
+candles and the account from a running terminal on the same machine, and
+trade through it, over HTTP and WebSocket on `127.0.0.1`.
 
 > **Status: pre-release.** The Local API ships with the next terminal
 > release. Until then this repository is private and the packages are not
@@ -19,8 +19,8 @@ on `127.0.0.1`.
 
 1. Open the terminal's **Settings App → General** and switch **Local API** on.
 2. Press **Copy token** and keep it in the `SPECTRE_LOCAL_API_TOKEN`
-   environment variable. The token is a secret: it grants the same read
-   access the terminal window has.
+   environment variable. The token is a secret: it grants everything the
+   terminal window can do, including placing orders.
 
 The clients find the port on their own (`instance.json` next to the
 terminal's database, default `48180`). See [docs/discovery.md](docs/discovery.md).
@@ -101,6 +101,8 @@ top, trades summary, clusters, candles — shaped for a model's context. See
 - [Discovery](docs/discovery.md) — where the port and the token come from
 - [Authentication](docs/authentication.md) — token, scopes, `401`/`403`, reissue
 - [Market data](docs/market-data.md) — catalogue, candles, snapshot, order book, clusters
+- [Account](docs/account.md) — orders, positions, balances, fills, and their stream topics
+- [Trading](docs/trading.md) — placing and cancelling orders, closing positions
 - [Streaming](docs/streaming.md) — `/v1/stream`: subscriptions, gaps, conflation, close codes
 - [Errors](docs/errors.md) — the error envelope and every code
 - [Compatibility](docs/compatibility.md) — terminal × API × SDK matrix

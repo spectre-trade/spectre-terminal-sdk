@@ -48,8 +48,18 @@ running; the first tool call then answers `terminal_unreachable`.
 | `recent_trades_summary` | buy and sell volume, delta, VWAP, range, largest print over the last N trades |
 | `cluster_summary` | the newest buckets: volume by side, delta, VWAP, the busiest price levels |
 | `candles` | OHLCV rows for an interval |
+| `account_overview` | balances, positions with PnL, open order counts of one connection |
+| `open_orders` | open orders and triggers with the terminal's `key` and the exchange id |
+| `recent_fills` | the latest fills with buy and sell volume totals |
+| `place_order` | places a limit or market order; needs a `client_key`; answers "accepted" |
+| `cancel_order` | cancels one order by key or exchange id |
+| `cancel_all_orders` | cancels every order of an instrument |
+| `close_position` | closes a position the way the window does |
 
-All tools are read-only and idempotent and say so in their annotations.
+Read tools are read-only and idempotent and say so in their annotations; the
+four trading tools are annotated as destructive, so an MCP client may ask the
+user before each call. Trading answers mean "accepted by the terminal", not
+"filled": the outcome is read from `open_orders` and `recent_fills`.
 Prices and sizes are decimal strings; times are UTC milliseconds plus an ISO
 twin. Errors start with a stable code (`unauthorized`, `not_found`,
 `unsupported`, `rate_limited`, `terminal_unreachable`, …) followed by a

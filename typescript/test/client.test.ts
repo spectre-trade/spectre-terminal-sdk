@@ -18,8 +18,11 @@ const TOKEN = `spt_${"ab".repeat(32)}`;
 const INSTRUMENT = "binance:futures:BTCUSDT";
 
 interface Recorded {
+  method: string;
   url: URL;
   headers: IncomingHttpHeaders;
+  /** The request body, decoded; `undefined` without one. */
+  body: unknown;
 }
 
 interface Reply {
@@ -51,7 +54,10 @@ async function json(name: string): Promise<Reply> {
 }
 
 /** Routes of the fake terminal; `undefined` means "never answer". */
-async function route(url: URL): Promise<Reply | undefined> {
+async function route(method: string, url: URL, body: unknown): Promise<Reply | undefined> {
+  if (url.pathname.startsWith("/v1/orders") || url.pathname === "/v1/positions/close") {
+    return routeWrite(method, url, body);
+  }
   switch (url.pathname) {
     case "/v1/meta":
       return json("meta");
@@ -101,9 +107,40 @@ async function route(url: URL): Promise<Reply | undefined> {
       return json("orderbook");
     case "/v1/market/clusters":
       return json("clusters");
+    case "/v1/account/orders":
+      return json("account_orders");
+    case "/v1/account/positions":
+      return json("account_positions");
+    case "/v1/account/balances":
+      return json("account_balances");
+    case "/v1/account/fills":
+      return json("account_fills");
     default:
       return envelope(404, "not_found", "no such operation");
   }
+}
+
+/** Writes: `connection_id` 409 is a connection that does not trade, 429 a busy listener. */
+async function routeWrite(method: string, url: URL, body: unknown): Promise<Reply> {
+  const connectionId =
+    typeof body === "object" && body !== null && "connection_id" in body
+      ? body.connection_id
+      : Number(url.searchParams.get("connection_id"));
+  if (connectionId === 409) {
+    return envelope(409, "not_tradable", "connection 409 is read-only");
+  }
+  if (connectionId === 429) {
+    return envelope(429, "rate_limited", "10 commands per second");
+  }
+  const expected =
+    url.pathname === "/v1/orders" || url.pathname === "/v1/orders/cancel-all" || url.pathname === "/v1/positions/close"
+      ? "POST"
+      : "DELETE";
+  if (method !== expected) {
+    return envelope(404, "not_found", `${method} ${url.pathname} is not an operation`);
+  }
+  const accepted = JSON.parse(await fixture("accepted")) as Record<string, unknown>;
+  return { status: 200, body: JSON.stringify({ ...accepted, key: method === "DELETE" ? null : accepted.key }) };
 }
 
 let server: Server;
@@ -113,8 +150,14 @@ const requests: Recorded[] = [];
 before(async () => {
   server = createServer(async (req, res) => {
     const url = new URL(req.url ?? "/", `http://${req.headers.host ?? "127.0.0.1"}`);
-    requests.push({ url, headers: req.headers });
-    const reply = await route(url);
+    const chunks: Buffer[] = [];
+    for await (const chunk of req) {
+      chunks.push(chunk as Buffer);
+    }
+    const text = Buffer.concat(chunks).toString("utf8");
+    const body: unknown = text === "" ? undefined : JSON.parse(text);
+    requests.push({ method: req.method ?? "", url, headers: req.headers, body });
+    const reply = await route(req.method ?? "", url, body);
     if (reply === undefined) {
       return; // leave the request open until the client gives up
     }
@@ -241,6 +284,150 @@ test("trades, snapshot, orderbook and clusters", async () => {
   assert.equal(clusters.data[0]?.levels[0]?.price, "67000.1");
   assert.equal(last().url.pathname, "/v1/market/clusters");
   assert.deepEqual(params(last().url), { instrument: INSTRUMENT });
+});
+
+test("account reads pass connection_id and the fills options", async () => {
+  const t = terminal();
+
+  const orders = await t.accountOrders(12);
+  assert.equal(orders.connection_id, 12);
+  assert.equal(orders.data[0]?.key, "t-123456789012345678");
+  assert.equal(orders.data[0]?.type, "limit");
+  assert.equal(orders.triggers[0]?.type, "stop_loss");
+  assert.equal(last().method, "GET");
+  assert.equal(last().url.pathname, "/v1/account/orders");
+  assert.deepEqual(params(last().url), { connection_id: "12" });
+
+  const positions = await t.accountPositions(12);
+  assert.equal(positions.data[0]?.side, "long");
+  assert.equal(positions.data[0]?.mark_price, "67000");
+  assert.equal(last().url.pathname, "/v1/account/positions");
+  assert.deepEqual(params(last().url), { connection_id: "12" });
+
+  const balances = await t.accountBalances(12);
+  assert.equal(balances.data[0]?.currency, "USDT");
+  assert.equal(balances.data[0]?.total, "1000.5");
+  assert.equal(last().url.pathname, "/v1/account/balances");
+  assert.deepEqual(params(last().url), { connection_id: "12" });
+
+  const fills = await t.accountFills(12, { limit: 50, sinceTs: 1730294400000 });
+  assert.equal(fills.data[0]?.trade_id, "t1");
+  assert.equal(fills.data[0]?.position_side, "long");
+  assert.equal(last().url.pathname, "/v1/account/fills");
+  assert.deepEqual(params(last().url), { connection_id: "12", limit: "50", since_ts: "1730294400000" });
+
+  await t.accountFills(12);
+  assert.deepEqual(params(last().url), { connection_id: "12" });
+});
+
+test("placeOrder posts the body under wire names, leaving out what was not given", async () => {
+  const t = terminal();
+
+  const accepted = await t.placeOrder({
+    connectionId: 12,
+    instrument: INSTRUMENT,
+    side: "buy",
+    type: "limit",
+    price: "67000.1",
+    size: "0.012",
+    reduceOnly: false,
+    postOnly: true,
+    timeInForce: "gtc",
+    clientKey: "bot-42",
+  });
+  assert.equal(accepted.accepted, true);
+  assert.equal(accepted.key, "t-173029440012300001");
+  assert.equal(accepted.operation_id, "1730294400123-000001");
+  const { method, url, headers, body } = last();
+  assert.equal(method, "POST");
+  assert.equal(url.pathname, "/v1/orders");
+  assert.equal(url.search, "");
+  assert.equal(headers["content-type"], "application/json");
+  assert.equal(headers.accept, "application/json");
+  assert.equal(headers.authorization, `Bearer ${TOKEN}`);
+  assert.equal(headers.origin, undefined);
+  assert.deepEqual(body, {
+    connection_id: 12,
+    instrument: INSTRUMENT,
+    side: "buy",
+    type: "limit",
+    price: "67000.1",
+    size: "0.012",
+    reduce_only: false,
+    post_only: true,
+    time_in_force: "gtc",
+    client_key: "bot-42",
+  });
+
+  await t.placeOrder({ connectionId: 12, instrument: INSTRUMENT, side: "sell", type: "market", notional: "100" });
+  assert.deepEqual(last().body, {
+    connection_id: 12,
+    instrument: INSTRUMENT,
+    side: "sell",
+    type: "market",
+    notional: "100",
+  });
+});
+
+test("cancelOrder deletes /v1/orders/{id} with the connection and instrument in the query", async () => {
+  const t = terminal();
+
+  const accepted = await t.cancelOrder({ connectionId: 12, instrument: INSTRUMENT, orderId: "t-173029440012300001" });
+  assert.equal(accepted.key, null);
+  assert.equal(last().method, "DELETE");
+  assert.equal(last().url.pathname, "/v1/orders/t-173029440012300001");
+  assert.deepEqual(params(last().url), { connection_id: "12", instrument: INSTRUMENT });
+  assert.equal(last().body, undefined);
+
+  await t.cancelOrder({ connectionId: 12, instrument: INSTRUMENT, orderId: "987654321" });
+  assert.equal(last().url.pathname, "/v1/orders/987654321");
+
+  await t.cancelOrder({ connectionId: 12, instrument: INSTRUMENT, orderId: "a/b?c" });
+  assert.equal(last().url.pathname, "/v1/orders/a%2Fb%3Fc");
+  assert.deepEqual(params(last().url), { connection_id: "12", instrument: INSTRUMENT });
+});
+
+test("cancelAll and closePosition post the instrument command", async () => {
+  const t = terminal();
+
+  await t.cancelAll({ connectionId: 12, instrument: INSTRUMENT });
+  assert.equal(last().method, "POST");
+  assert.equal(last().url.pathname, "/v1/orders/cancel-all");
+  assert.equal(last().headers["content-type"], "application/json");
+  assert.deepEqual(last().body, { connection_id: 12, instrument: INSTRUMENT });
+
+  const accepted = await t.closePosition({ connectionId: 12, instrument: INSTRUMENT });
+  assert.equal(accepted.instrument, INSTRUMENT);
+  assert.equal(last().method, "POST");
+  assert.equal(last().url.pathname, "/v1/positions/close");
+  assert.deepEqual(last().body, { connection_id: 12, instrument: INSTRUMENT });
+});
+
+test("not_tradable and rate_limited on writes are ApiErrors without the token", async () => {
+  const t = terminal();
+  const order = { instrument: INSTRUMENT, side: "buy", type: "limit", price: "1", size: "1" } as const;
+
+  const notTradable = await t.placeOrder({ connectionId: 409, ...order }).catch((e: unknown) => e);
+  assert.ok(notTradable instanceof ApiError);
+  assert.equal(notTradable.code, "not_tradable");
+  assert.equal(notTradable.status, 409);
+  assert.equal(notTradable.detail, "connection 409 is read-only");
+
+  const cancelRefused = await t
+    .cancelOrder({ connectionId: 409, instrument: INSTRUMENT, orderId: "t-1" })
+    .catch((e: unknown) => e);
+  assert.ok(cancelRefused instanceof ApiError);
+  assert.equal(cancelRefused.code, "not_tradable");
+
+  const limited = await t.cancelAll({ connectionId: 429, instrument: INSTRUMENT }).catch((e: unknown) => e);
+  assert.ok(limited instanceof ApiError);
+  assert.equal(limited.code, "rate_limited");
+  assert.equal(limited.status, 429);
+
+  for (const error of [notTradable, cancelRefused, limited]) {
+    assert.ok(!String(error).includes(TOKEN));
+    assert.ok(!inspect(error, { depth: 10 }).includes(TOKEN));
+  }
 });
 
 test("non-2xx with the envelope is an ApiError with code and status", async () => {

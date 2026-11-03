@@ -2,10 +2,10 @@
  * The REST client of Local API v1.
  *
  * {@link Terminal} wraps the global `fetch` (Node 22+). Every request carries
- * `Authorization: Bearer <token>` and `Accept: application/json`, nothing
- * else; redirects are refused and each request has a timeout. The token
- * lives in a private field and never appears in errors, `JSON.stringify` or
- * `util.inspect` output.
+ * `Authorization: Bearer <token>` and `Accept: application/json` (writes add
+ * `Content-Type: application/json`), nothing else; redirects are refused and
+ * each request has a timeout. The token lives in a private field and never
+ * appears in errors, `JSON.stringify` or `util.inspect` output.
  *
  * @module
  */
@@ -19,18 +19,29 @@ import {
 } from "./errors.ts";
 import { Stream } from "./stream.ts";
 import type {
+  Accepted,
+  AccountBalances,
+  AccountFills,
+  AccountOrders,
+  AccountPositions,
   Candles,
   Clusters,
   Connection,
+  Decimal,
   Health,
   InstrumentAddress,
   Instrument,
+  InstrumentCommandRequest,
   InstrumentsPage,
   Intervals,
   List,
   Meta,
   Orderbook,
+  OrderType,
+  PlaceOrderRequest,
+  Side,
   Snapshot,
+  TimeInForce,
   Trades,
 } from "./types.ts";
 
@@ -110,6 +121,58 @@ export interface OrderbookOptions {
   connectionId?: number;
 }
 
+/** Options of {@link Terminal.accountFills}. */
+export interface AccountFillsOptions {
+  /** 1–1000 latest, default 100. */
+  limit?: number;
+  /** Not earlier than this exchange time, UTC milliseconds. */
+  sinceTs?: number;
+}
+
+/**
+ * Options of {@link Terminal.placeOrder}. Money is passed as decimal strings
+ * and sent as given; the terminal checks the venue's minimums and steps and
+ * answers `invalid_request` with the reason.
+ */
+export interface PlaceOrderOptions {
+  /** The trading connection; there is no default. */
+  connectionId: number;
+  instrument: InstrumentAddress;
+  side: Side;
+  /** `limit` needs `price`, `market` takes none. */
+  type: OrderType;
+  price?: Decimal;
+  /** Amount in the base coin; exactly one of `size` and `notional`. */
+  size?: Decimal;
+  /** The quote amount; exactly one of `size` and `notional`. */
+  notional?: Decimal;
+  /** Default `false`. */
+  reduceOnly?: boolean;
+  /** Default `false`. */
+  postOnly?: boolean;
+  /** Absent — the venue's default. */
+  timeInForce?: TimeInForce;
+  /**
+   * Idempotency key: a repeat with the same key returns the previous answer
+   * and does not duplicate the order (the terminal remembers the last thousand).
+   */
+  clientKey?: string;
+}
+
+/** Options of {@link Terminal.cancelOrder}. */
+export interface CancelOrderOptions {
+  connectionId: number;
+  instrument: InstrumentAddress;
+  /** The terminal key (`t-…`) or the exchange's order id. */
+  orderId: string;
+}
+
+/** Options of {@link Terminal.cancelAll} and {@link Terminal.closePosition}. */
+export interface InstrumentCommandOptions {
+  connectionId: number;
+  instrument: InstrumentAddress;
+}
+
 /** Options of {@link Terminal.stream}. */
 export interface StreamOptions {
   /** Handshake timeout; defaults to the client's `timeoutMs`. */
@@ -117,6 +180,14 @@ export interface StreamOptions {
 }
 
 type Query = Record<string, string | number | undefined>;
+
+type Method = "GET" | "POST" | "DELETE";
+
+interface RequestOptions {
+  query?: Query;
+  /** Serialised as JSON; `undefined` properties are left out. */
+  body?: object;
+}
 
 /**
  * A client of one running terminal.
@@ -299,6 +370,93 @@ export class Terminal {
     });
   }
 
+  /**
+   * `GET /v1/account/orders` (`account:read`): open orders and trigger
+   * orders of one connection, the same cut the terminal window sees.
+   * `not_found` for an unknown connection.
+   */
+  accountOrders(connectionId: number): Promise<AccountOrders> {
+    return this.#get<AccountOrders>("account/orders", { connection_id: connectionId });
+  }
+
+  /** `GET /v1/account/positions` (`account:read`): open positions of one connection. */
+  accountPositions(connectionId: number): Promise<AccountPositions> {
+    return this.#get<AccountPositions>("account/positions", { connection_id: connectionId });
+  }
+
+  /**
+   * `GET /v1/account/balances` (`account:read`): per currency, the latest
+   * value the exchange sent since the API was switched on. A currency
+   * nothing happened to since then is absent.
+   */
+  accountBalances(connectionId: number): Promise<AccountBalances> {
+    return this.#get<AccountBalances>("account/balances", { connection_id: connectionId });
+  }
+
+  /**
+   * `GET /v1/account/fills` (`account:read`): the connection's fills since
+   * the API was switched on (the last thousand), oldest to newest.
+   */
+  accountFills(connectionId: number, options: AccountFillsOptions = {}): Promise<AccountFills> {
+    return this.#get<AccountFills>("account/fills", {
+      connection_id: connectionId,
+      limit: options.limit,
+      since_ts: options.sinceTs,
+    });
+  }
+
+  /**
+   * `POST /v1/orders` (`trading:write`): place a limit or market order with
+   * the same command the window uses. The answer means accepted by the
+   * terminal, not by the exchange: watch `account.orders` in the stream, or
+   * {@link accountOrders}, for the order under `key`. `not_tradable` (409)
+   * for a disabled, read-only or credential-less connection,
+   * `invalid_request` (400) for a foreign instrument or a refused size or
+   * price, `rate_limited` (429) above `limits.commands_per_second`.
+   */
+  placeOrder(options: PlaceOrderOptions): Promise<Accepted> {
+    const body: PlaceOrderRequest = {
+      connection_id: options.connectionId,
+      instrument: options.instrument,
+      side: options.side,
+      type: options.type,
+      price: options.price,
+      size: options.size,
+      notional: options.notional,
+      reduce_only: options.reduceOnly,
+      post_only: options.postOnly,
+      time_in_force: options.timeInForce,
+      client_key: options.clientKey,
+    };
+    return this.#request<Accepted>("POST", "orders", { body });
+  }
+
+  /**
+   * `DELETE /v1/orders/{id}` (`trading:write`): cancel one order by the
+   * terminal key (`t-…`) or the exchange's id. The cancellation goes to the
+   * exchange directly; the confirmation arrives through the stream.
+   */
+  cancelOrder(options: CancelOrderOptions): Promise<Accepted> {
+    return this.#request<Accepted>("DELETE", `orders/${encodeURIComponent(options.orderId)}`, {
+      query: { connection_id: options.connectionId, instrument: options.instrument },
+    });
+  }
+
+  /** `POST /v1/orders/cancel-all` (`trading:write`): cancel every order of the instrument, as the space bar does. */
+  cancelAll(options: InstrumentCommandOptions): Promise<Accepted> {
+    return this.#request<Accepted>("POST", "orders/cancel-all", { body: instrumentCommand(options) });
+  }
+
+  /**
+   * `POST /v1/positions/close` (`trading:write`): close the instrument's
+   * position the way the window does — a market order for the position size
+   * on futures, "cancel all and close" as one atomic command on spot.
+   * `invalid_request` without an open position.
+   */
+  closePosition(options: InstrumentCommandOptions): Promise<Accepted> {
+    return this.#request<Accepted>("POST", "positions/close", { body: instrumentCommand(options) });
+  }
+
   /** Open `/v1/stream`. Node only: the token goes in the handshake header. */
   stream(options: StreamOptions = {}): Promise<Stream> {
     return Stream.connect({
@@ -318,30 +476,41 @@ export class Terminal {
     return `Terminal { host: '${this.host}', port: ${this.port}, timeoutMs: ${this.timeoutMs}, token: <redacted> }`;
   }
 
-  async #get<T>(path: string, query?: Query): Promise<T> {
+  #get<T>(path: string, query?: Query): Promise<T> {
+    return this.#request<T>("GET", path, { query });
+  }
+
+  async #request<T>(method: Method, path: string, options: RequestOptions): Promise<T> {
     const url = new URL(path, this.baseUrl);
-    if (query !== undefined) {
-      for (const [key, value] of Object.entries(query)) {
+    if (options.query !== undefined) {
+      for (const [key, value] of Object.entries(options.query)) {
         if (value !== undefined) {
           url.searchParams.set(key, String(value));
         }
       }
     }
+    const headers: Record<string, string> = {
+      Authorization: `Bearer ${this.#token}`,
+      Accept: "application/json",
+    };
+    if (method !== "GET") {
+      headers["Content-Type"] = "application/json";
+    }
 
     let response: Response;
     try {
       response = await fetch(url, {
-        method: "GET",
-        headers: {
-          Authorization: `Bearer ${this.#token}`,
-          Accept: "application/json",
-        },
+        method,
+        headers,
+        // JSON.stringify leaves out `undefined` properties, so optional
+        // fields that were not given are absent from the wire.
+        body: options.body === undefined ? undefined : JSON.stringify(options.body),
         redirect: "error",
         signal: AbortSignal.timeout(this.timeoutMs),
       });
     } catch (cause) {
       throw new TerminalUnreachableError(
-        `GET ${url.pathname} on ${authority(this.host, this.port)} got no answer: ${describeFailure(cause)}`,
+        `${method} ${url.pathname} on ${authority(this.host, this.port)} got no answer: ${describeFailure(cause)}`,
         { cause },
       );
     }
@@ -356,6 +525,11 @@ export class Terminal {
     }
     throw errorFrom(response.status, text);
   }
+}
+
+/** The wire body of `cancel-all` and `positions/close`. */
+function instrumentCommand(options: InstrumentCommandOptions): InstrumentCommandRequest {
+  return { connection_id: options.connectionId, instrument: options.instrument };
 }
 
 /** `host:port`, bracketing an IPv6 literal. */

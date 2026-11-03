@@ -21,7 +21,15 @@ EXPECTED_TOOLS = {
     "recent_trades_summary",
     "cluster_summary",
     "candles",
+    "account_overview",
+    "open_orders",
+    "recent_fills",
+    "place_order",
+    "cancel_order",
+    "cancel_all_orders",
+    "close_position",
 }
+TRADING_TOOLS = {"place_order", "cancel_order", "cancel_all_orders", "close_position"}
 
 
 async def test_tools_are_registered_read_only(provider: TerminalProvider) -> None:
@@ -31,7 +39,14 @@ async def test_tools_are_registered_read_only(provider: TerminalProvider) -> Non
     for tool in listed:
         assert tool.description, tool.name
         assert tool.input_schema["type"] == "object"
-        assert tool.annotations is not None and tool.annotations.read_only_hint is True
+        assert tool.annotations is not None
+        if tool.name in TRADING_TOOLS:
+            assert tool.annotations.read_only_hint is False, tool.name
+            assert tool.annotations.destructive_hint is True, tool.name
+        else:
+            assert tool.annotations.read_only_hint is True, tool.name
+    place = next(t for t in listed if t.name == "place_order").input_schema
+    assert "client_key" in place["required"], "ключ идемпотентности обязателен"
     schema = next(t for t in listed if t.name == "order_book_top").input_schema
     assert schema["required"] == ["instrument"]
     assert schema["properties"]["depth"]["maximum"] == 50
@@ -182,3 +197,100 @@ async def test_tool_errors_never_carry_the_token(provider: TerminalProvider) -> 
 def test_read_only_annotations_are_shared() -> None:
     assert tools.READ_ONLY.read_only_hint is True
     assert tools.READ_ONLY.destructive_hint is False
+
+
+async def test_account_tools_read_one_connection(
+    provider: TerminalProvider, fake_api: FakeApi
+) -> None:
+    server = build_server(provider)
+    overview = _structured(await server.call_tool("account_overview", {"connection_id": 12}))
+    assert overview["balances"][0]["currency"] == "USDT"
+    assert overview["positions"][0]["side"] == "long"
+    assert overview["open_orders"] == [
+        {"instrument": "binance:futures:BTCUSDT", "orders": 1, "triggers": 1}
+    ]
+    paths = [p for p, _q, _h in fake_api.requests]
+    assert paths == ["/v1/account/balances", "/v1/account/positions", "/v1/account/orders"]
+    assert all(q["connection_id"] == ["12"] for _p, q, _h in fake_api.requests)
+
+    orders = _structured(
+        await server.call_tool(
+            "open_orders", {"connection_id": 12, "instrument": "binance:futures:BTCUSDT"}
+        )
+    )
+    assert orders["orders"][0]["key"] == "t-123456789012345678"
+    assert orders["orders"][0]["type"] == "limit"
+    assert orders["triggers"][0]["type"] == "stop_loss"
+    none = _structured(
+        await server.call_tool("open_orders", {"connection_id": 12, "instrument": "x:y:Z"})
+    )
+    assert none["orders"] == [] and none["triggers"] == []
+
+    fills = _structured(
+        await server.call_tool("recent_fills", {"connection_id": 12, "limit": 5, "since_ts": 7})
+    )
+    assert fills["count"] == 1 and fills["buy_volume"] == "0.012"
+    query = fake_api.requests[-1][1]
+    assert (query["limit"], query["since_ts"]) == (["5"], ["7"])
+
+    with pytest.raises(ToolError) as raised:
+        await server.call_tool("account_overview", {"connection_id": 99})
+    assert "not_found" in _error_text(raised.value)
+
+
+async def test_trading_tools_send_the_commands_and_answer_accepted(
+    provider: TerminalProvider, fake_api: FakeApi
+) -> None:
+    server = build_server(provider)
+    placed = _structured(
+        await server.call_tool(
+            "place_order",
+            {
+                "connection_id": 12,
+                "instrument": "binance:futures:BTCUSDT",
+                "side": "buy",
+                "order_type": "limit",
+                "price": "67000.1",
+                "size": "0.012",
+                "client_key": "intent-1",
+                "post_only": True,
+            },
+        )
+    )
+    assert placed["accepted"] is True
+    assert placed["key"] == "t-173029440012300001"
+    assert "not by the exchange" in placed["note"]
+    method, path, body = fake_api.bodies[-1]
+    assert (method, path) == ("POST", "/v1/orders")
+    assert body["side"] == "buy" and body["type"] == "limit"
+    assert body["price"] == "67000.1" and body["size"] == "0.012"
+    assert body["client_key"] == "intent-1" and body["post_only"] is True
+
+    cancelled = _structured(
+        await server.call_tool(
+            "cancel_order",
+            {"connection_id": 12, "instrument": "binance:futures:BTCUSDT", "order_id": "t-1"},
+        )
+    )
+    assert cancelled["key"] is None
+    method, path, _body = fake_api.bodies[-1]
+    assert method == "DELETE" and path.startswith("/v1/orders/t-1?")
+
+    _structured(
+        await server.call_tool(
+            "cancel_all_orders", {"connection_id": 12, "instrument": "binance:futures:BTCUSDT"}
+        )
+    )
+    assert fake_api.bodies[-1][1] == "/v1/orders/cancel-all"
+    _structured(
+        await server.call_tool(
+            "close_position", {"connection_id": 12, "instrument": "binance:futures:BTCUSDT"}
+        )
+    )
+    assert fake_api.bodies[-1][1] == "/v1/positions/close"
+
+    with pytest.raises(ToolError) as raised:
+        await server.call_tool(
+            "close_position", {"connection_id": 13, "instrument": "binance:futures:BTCUSDT"}
+        )
+    assert "not_tradable" in _error_text(raised.value)

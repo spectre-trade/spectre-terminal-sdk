@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "spectre-terminal"
 version = "0.1.0"
-description = "Python client for the Local API of Spectre Terminal: connections, instruments, trades, order books, clusters and candles over HTTP and WebSocket on 127.0.0.1."
+description = "Python client for the Local API of Spectre Terminal: connections, instruments, trades, order books, clusters, candles, the account and order placement over HTTP and WebSocket on 127.0.0.1."
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.10"

@@ -1,0 +1,15 @@
+{
+  "connection_id": 12,
+  "data": [
+    {
+      "instrument": "binance:futures:BTCUSDT",
+      "side": "long",
+      "size": "0.5",
+      "lot_size": "1",
+      "entry_price": "66500",
+      "notional": "33250",
+      "unrealized_pnl": "250",
+      "mark_price": "67000"
+    }
+  ]
+}

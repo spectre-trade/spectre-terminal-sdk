@@ -40,6 +40,15 @@ The id is shared by every client subscribed to the same pair and topic;
 | `mark_price` | — | `{ "mark_price": "…", "ts": … }` | conflated |
 | `book.top` | `depth` 1–200 (50), `interval_ms` ≥ 50 (100) | top of the book, as `/market/orderbook` | conflated at your interval; `seq` is the book version; first frame as soon as the book is ready |
 | `clusters` | — | one bucket, as an element of `data` in `/market/clusters` | conflated per bucket; the source flushes every 16 ms |
+| `account.orders` | — | `{ instrument, orders, triggers }` of one instrument after a change | conflated: latest state |
+| `account.positions` | — | `{ instrument, position }`; a close is `position: null` | conflated |
+| `account.balances` | — | one currency's balance | conflated |
+| `account.fills` | — | one fill | a frame per fill, dropped when the queue is full; `seq` shows the gap |
+
+Account topics are keyed by **connection**, not instrument: subscribe with
+`connection_id` and no `instrument` (scope `account:read`). They do not touch
+the exchange and send no snapshot; read the state with `/v1/account/*` first.
+See [account.md](account.md).
 
 `book.top` parameters are per subscriber: two clients can watch the same book
 at different depths and rates. Out-of-range values are refused with

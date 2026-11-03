@@ -2,7 +2,8 @@
 
 Built on :mod:`urllib.request` only. Every request carries exactly two
 headers of ours — ``Authorization: Bearer <token>`` and ``Accept:
-application/json`` — never an ``Origin``. Redirects are not followed and
+application/json`` — plus ``Content-Type: application/json`` on a request
+with a body, never an ``Origin``. Redirects are not followed and
 environment proxies are ignored: the client talks to the loopback interface
 and nothing else.
 """
@@ -28,6 +29,11 @@ from .errors import (
     TokenMissing,
 )
 from .models import (
+    Accepted,
+    AccountBalances,
+    AccountFills,
+    AccountOrders,
+    AccountPositions,
     Candles,
     Clusters,
     Connection,
@@ -42,7 +48,7 @@ from .models import (
 )
 from .stream import Stream
 
-__all__ = ["API_VERSION", "Terminal"]
+__all__ = ["API_VERSION", "Money", "Terminal"]
 
 API_VERSION = "1"
 """The API version this client speaks; checked against ``/v1/meta`` by :meth:`Terminal.discover`."""
@@ -54,6 +60,18 @@ _UNAUTHORIZED_HINT = (
 )
 
 _log = logging.getLogger("spectre_terminal")
+
+Money = Decimal | str | int
+"""What :meth:`Terminal.place_order` accepts as a price or amount; sent as a string."""
+
+
+def _money(value: Money) -> str:
+    """A price or amount as the exact decimal string the contract wants; floats are refused."""
+    if isinstance(value, (bool, float)):
+        raise TypeError(f"money must be Decimal, str or int, not {type(value).__name__}")
+    if isinstance(value, Decimal):
+        return format(value, "f")
+    return str(value)
 
 
 class _NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -341,6 +359,136 @@ class Terminal:
         body = self._get("/market/clusters", instrument=instrument, connection_id=connection_id)
         return Clusters.from_dict(body)
 
+    # --- account (account:read) -------------------------------------------
+
+    def account_orders(self, connection_id: int) -> AccountOrders:
+        """``GET /v1/account/orders``: open orders and trigger orders of one connection.
+
+        ``connection_id`` is required: there is no default connection on the
+        account operations. An unknown id is ``ApiError`` ``not_found``.
+        """
+        body = self._get("/account/orders", connection_id=int(connection_id))
+        return AccountOrders.from_dict(body)
+
+    def account_positions(self, connection_id: int) -> AccountPositions:
+        """``GET /v1/account/positions``: open positions of one connection."""
+        body = self._get("/account/positions", connection_id=int(connection_id))
+        return AccountPositions.from_dict(body)
+
+    def account_balances(self, connection_id: int) -> AccountBalances:
+        """``GET /v1/account/balances``: per currency, the latest balance the exchange sent.
+
+        Balances are accumulated from the moment the API was switched on: a
+        currency nothing happened to since then is absent from the list.
+        """
+        body = self._get("/account/balances", connection_id=int(connection_id))
+        return AccountBalances.from_dict(body)
+
+    def account_fills(
+        self,
+        connection_id: int,
+        *,
+        limit: int | None = None,
+        since_ts: int | None = None,
+    ) -> AccountFills:
+        """``GET /v1/account/fills``: the connection's latest fills, oldest first.
+
+        ``limit`` is 1-1000 (default 100); ``since_ts`` keeps fills not
+        earlier than that exchange time in UTC milliseconds. The buffer is
+        the last thousand fills since the API was switched on.
+        """
+        body = self._get(
+            "/account/fills",
+            connection_id=int(connection_id),
+            limit=limit,
+            since_ts=since_ts,
+        )
+        return AccountFills.from_dict(body)
+
+    # --- trading (trading:write) ------------------------------------------
+
+    def place_order(
+        self,
+        connection_id: int,
+        instrument: str,
+        *,
+        side: str,
+        order_type: str,
+        price: Money | None = None,
+        size: Money | None = None,
+        notional: Money | None = None,
+        reduce_only: bool = False,
+        post_only: bool = False,
+        time_in_force: str | None = None,
+        client_key: str | None = None,
+    ) -> Accepted:
+        """``POST /v1/orders``: place an order the way the window does.
+
+        ``side`` is ``buy`` or ``sell``; ``order_type`` is ``limit`` (needs
+        ``price``) or ``market`` (no ``price``); exactly one of ``size`` (base
+        coin) and ``notional`` (quote amount) is given. Money is
+        :class:`~decimal.Decimal`, ``str`` or ``int`` and travels as a string;
+        a ``float`` is refused. ``time_in_force`` is ``gtc``, ``ioc``, ``fok``
+        or ``post_only``; absent means the venue's default. ``client_key`` is
+        an idempotency key: a repeat with the same key returns the previous
+        answer and places nothing.
+
+        The answer is :class:`~spectre_terminal.models.Accepted` — accepted
+        by the terminal, not by the exchange; the outcome arrives on
+        ``account.orders`` or in :meth:`account_orders`. A connection that
+        does not trade is ``ApiError`` ``not_tradable``; a refusal by the
+        venue's minimums and steps is ``invalid_request``; faster than
+        ``limits.commands_per_second`` is ``rate_limited``.
+        """
+        if (size is None) == (notional is None):
+            raise ValueError("exactly one of size and notional is required")
+        body: dict[str, Any] = {
+            "connection_id": int(connection_id),
+            "instrument": instrument,
+            "side": side,
+            "type": order_type,
+            "reduce_only": bool(reduce_only),
+            "post_only": bool(post_only),
+        }
+        if price is not None:
+            body["price"] = _money(price)
+        if size is not None:
+            body["size"] = _money(size)
+        if notional is not None:
+            body["notional"] = _money(notional)
+        if time_in_force is not None:
+            body["time_in_force"] = time_in_force
+        if client_key is not None:
+            body["client_key"] = client_key
+        return Accepted.from_dict(self._send("POST", "/orders", body))
+
+    def cancel_order(self, connection_id: int, instrument: str, order_id: str) -> Accepted:
+        """``DELETE /v1/orders/{id}``: cancel one order by terminal key (``t-...``) or exchange id.
+
+        The cancellation goes to the exchange directly; the confirmation
+        arrives through the stream. ``Accepted.key`` is ``None``.
+        """
+        path = "/orders/" + urllib.parse.quote(str(order_id), safe="")
+        body = self._send(
+            "DELETE", path, None, connection_id=int(connection_id), instrument=instrument
+        )
+        return Accepted.from_dict(body)
+
+    def cancel_all(self, connection_id: int, instrument: str) -> Accepted:
+        """``POST /v1/orders/cancel-all``: cancel every order of the instrument (the space bar)."""
+        body = {"connection_id": int(connection_id), "instrument": instrument}
+        return Accepted.from_dict(self._send("POST", "/orders/cancel-all", body))
+
+    def close_position(self, connection_id: int, instrument: str) -> Accepted:
+        """``POST /v1/positions/close``: close the instrument's position the way the window does.
+
+        On futures a market order for the position size with
+        ``close_position``; on spot "cancel all and close" as one atomic
+        command. Without an open position — ``ApiError`` ``invalid_request``.
+        """
+        body = {"connection_id": int(connection_id), "instrument": instrument}
+        return Accepted.from_dict(self._send("POST", "/positions/close", body))
+
     def stream(self) -> Stream:
         """A :class:`~spectre_terminal.stream.Stream` for ``/v1/stream``, for ``async with``."""
         return Stream(self.stream_url, self._token, open_timeout=self._timeout)
@@ -349,22 +497,29 @@ class Terminal:
 
     def _get(self, path: str, **params: Any) -> Mapping[str, Any]:
         """``GET`` ``path`` under ``/v1`` with the non-``None`` ``params`` as the query string."""
+        return self._send("GET", path, None, **params)
+
+    def _send(
+        self, method: str, path: str, body: Mapping[str, Any] | None, **params: Any
+    ) -> Mapping[str, Any]:
+        """One request to ``path`` under ``/v1``: ``params`` as the query, ``body`` as JSON."""
         query = {key: value for key, value in params.items() if value is not None}
         url = self.base_url + path
         if query:
             url = f"{url}?{urllib.parse.urlencode(query)}"
-        request = urllib.request.Request(
-            url,
-            headers={
-                "Authorization": f"Bearer {self._token}",
-                "Accept": "application/json",
-            },
-            method="GET",
-        )
-        _log.debug("GET %s", url)
+        headers = {
+            "Authorization": f"Bearer {self._token}",
+            "Accept": "application/json",
+        }
+        data: bytes | None = None
+        if body is not None:
+            data = json.dumps(body, separators=(",", ":")).encode("utf-8")
+            headers["Content-Type"] = "application/json"
+        request = urllib.request.Request(url, data=data, headers=headers, method=method)
+        _log.debug("%s %s", method, url)
         try:
             with self._opener.open(request, timeout=self._timeout) as response:
-                body = response.read()
+                raw = response.read()
         except urllib.error.HTTPError as error:
             raise _error_from_body(error.code, error.read()) from None
         except urllib.error.URLError as error:
@@ -372,7 +527,7 @@ class Terminal:
         except (OSError, http.client.HTTPException) as error:
             raise TerminalUnreachable(self._unreachable(error)) from None
         try:
-            decoded = json.loads(body, parse_float=Decimal)
+            decoded = json.loads(raw, parse_float=Decimal)
         except ValueError:
             raise SpectreTerminalError(
                 f"the terminal answered {path} with a non-JSON body"

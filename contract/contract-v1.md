@@ -3,8 +3,8 @@
 The Local API is HTTP/JSON and WebSocket/JSON on `127.0.0.1` inside the
 terminal process. An external program on the same machine — a script, an
 SDK, later an MCP client — gets the same data the window gets: connections,
-the instrument catalogue, trades, the order book, clusters, candles. There is
-no write path (orders, settings) in v1. The reasoning and the design live in
+the instrument catalogue, trades, the order book, clusters, candles, the
+account — and places orders with the same commands the window uses. The reasoning and the design live in
 the terminal repository as ADR-0014; this page is what clients are promised.
 Within v1 the contract only grows: new fields, codes, topics and operations
 may appear, existing ones never change type and never disappear. A client
@@ -27,8 +27,12 @@ the supported clients are the SDK packages.
 - The token is `spt_` followed by 64 hex characters. It is passed only in
   the `Authorization: Bearer <token>` header, for HTTP and for the WebSocket
   handshake alike. A token in the query string is not accepted.
-- Token scopes: `market:read` (market data, catalogue, stream) and
-  `connections:read` (connections). Both are granted.
+- Token scopes: `market:read` (market data, catalogue, stream),
+  `connections:read` (connections), `account:read` (orders, positions,
+  balances, fills) and `trading:write` (placing and cancelling orders,
+  closing positions). All are granted: there is no separate write switch,
+  an enabled Local API grants everything (product decision). A token issued
+  before a scope existed receives it on the next terminal start.
 
 A request is rejected before processing when:
 
@@ -71,7 +75,8 @@ There is no CORS layer on purpose: a browser page must not reach the API.
 | `invalid_request` | 400 | parameters: bad instrument, interval, depth, foreign `connection_id` |
 | `unsupported` | 501 | the venue's data is not relayed (MOEX) or the terminal was built without the market-data tap |
 | `not_active` | 409 | clusters of the instrument are not being computed yet (see `/market/clusters`) |
-| `rate_limited` | 429 | ceiling on connections, subscriptions, instruments or subscription rate |
+| `rate_limited` | 429 | ceiling on connections, subscriptions, instruments, subscription rate or trading commands |
+| `not_tradable` | 409 | the connection does not trade: disabled, read-only or without credentials |
 | `unavailable` | 503 | storage, exchange or coordinator did not answer; no data yet |
 
 MOEX data is not served through the API (`unsupported`) while the product
@@ -79,7 +84,8 @@ question of relaying it stays open.
 
 ## Operations
 
-All are `GET`. The required scope is named at each one.
+Reads are `GET`, writes are `POST` and `DELETE` (section "Writing"). The
+required scope is named at each one.
 
 ### `/v1/meta` — any token
 
@@ -92,14 +98,16 @@ API version, terminal build, token scopes, limits, stream topics.
   "build_hash": "3f1c2ab",
   "build_env": "production",
   "features": "local-api",
-  "scopes": ["market:read", "connections:read"],
+  "scopes": ["market:read", "connections:read", "account:read", "trading:write"],
   "limits": {
     "ws_connections_per_token": 8,
     "subscriptions_per_connection": 100,
     "api_only_instruments": 50,
-    "exchange_subscriptions_per_second": 5
+    "exchange_subscriptions_per_second": 5,
+    "commands_per_second": 10
   },
-  "topics": ["trades", "ticker", "mark_price", "book.top", "clusters"]
+  "topics": ["trades", "ticker", "mark_price", "book.top", "clusters",
+             "account.orders", "account.positions", "account.balances", "account.fills"]
 }
 ```
 
@@ -359,7 +367,181 @@ from history without a trade time. The interval is one per instrument and is
 chosen in the terminal: a change shows up in the `interval` field of the next
 response.
 
-## Stream `/v1/stream` — `market:read`
+## Account — `account:read`
+
+Orders, positions, balances and fills of **one connection**: `connection_id`
+is required on all four operations, there is no default connection here — a
+venue may have several trading connections, and showing someone else's
+account silently is not acceptable. An unknown id is `404 not_found`. Orders
+and positions are the same cut the terminal window sees; balances and fills
+are accumulated by the terminal from the moment the API is switched on: the
+exchange sends a balance on change, not on request, so a currency nothing
+happened to since the switch-on is absent from the list. Instruments are
+addressed as `exchange:market:symbol` everywhere. Switching a connection off
+or restarting it clears its copy of balances and fills.
+
+### `/v1/account/orders`
+
+Open orders (`pending`, `open`, `partially_filled`) and trigger orders.
+
+```json
+{
+  "connection_id": 12,
+  "data": [
+    { "key": "t-123456789012345678", "exchange_id": "987654321",
+      "instrument": "binance:futures:BTCUSDT", "side": "buy", "type": "limit",
+      "price": "67000.1", "size": "0.012", "filled": "0", "remaining": "0.012",
+      "notional": "804", "status": "open", "created_ts": 1730294400123 }
+  ],
+  "triggers": [
+    { "id": "42", "instrument": "binance:futures:BTCUSDT", "type": "stop_loss",
+      "trigger_price": "66000", "rule": "price_below_or_equal", "size": "0.012",
+      "notional": "804", "status": "open", "order_type": "market",
+      "client_id": "c1", "created_ts": 1730294400123 }
+  ]
+}
+```
+
+`key` is the terminal's order key (`t-…`), `exchange_id` the exchange's id;
+either is `null` while unknown. `size`, `filled`, `remaining` are in the base
+coin, `notional` is the quote amount the trader entered (`null` for an order
+that came from an exchange snapshot). `status`: `pending`, `open`,
+`partially_filled`. A trigger's `type` is `stop_loss`, `take_profit` or
+`stop`; `rule` is `price_above_or_equal` or `price_below_or_equal`; `status`
+is `open`, `finished`, `inactive` or `invalid`; `size`, `notional`,
+`order_type`, `client_id` and `created_ts` may be `null`.
+
+### `/v1/account/positions`
+
+```json
+{
+  "connection_id": 12,
+  "data": [
+    { "instrument": "binance:futures:BTCUSDT", "side": "long", "size": "0.5",
+      "lot_size": "1", "entry_price": "66500", "notional": "33250",
+      "unrealized_pnl": "250", "mark_price": "67000" }
+  ]
+}
+```
+
+`size` is in the base coin (on MOEX in lots, `lot_size` being base units per
+lot), `notional` in the quote, `unrealized_pnl` as the terminal computes it,
+`mark_price` the terminal's mark (best bid for a long, best ask for a short),
+`null` until the first book tick.
+
+### `/v1/account/balances`
+
+```json
+{
+  "connection_id": 12,
+  "data": [
+    { "currency": "USDT", "total": "1000.5", "available": "900.5",
+      "locked": "100", "ts": 1730294400123 }
+  ]
+}
+```
+
+Per currency, the latest value from the exchange; `available` and `locked`
+are `null` when the venue does not report them; `ts` is the exchange time
+where there is one, otherwise the receive time.
+
+### `/v1/account/fills`
+
+| Parameter | Value |
+| --- | --- |
+| `limit` | 1–1000 latest, default 100 |
+| `since_ts` | not earlier than this exchange time, UTC milliseconds |
+
+```json
+{
+  "connection_id": 12,
+  "data": [
+    { "trade_id": "t1", "order_id": "987654321",
+      "instrument": "binance:futures:BTCUSDT", "side": "buy", "price": "67000.1",
+      "qty": "0.012", "fee": "0.32", "fee_currency": "USDT",
+      "position_side": "long", "ts": 1730294400123 }
+  ]
+}
+```
+
+Oldest to newest; the buffer is the connection's last thousand fills since
+the API was switched on. `position_side` is `long`/`short` on hedged venues,
+otherwise `null`.
+
+## Writing — `trading:write`
+
+Trading commands go through the same channel and the same handlers as the
+window's commands, with source `api` in the operations file. The `accepted`
+answer means **accepted by the terminal**, not by the exchange: the
+exchange's confirmation, fill or rejection arrives through the stream — the
+client watches `account.orders` in the stream or `GET /v1/account/orders`,
+as the window watches its book. The connection must trade (enabled, with
+credentials, not read-only), otherwise `409 not_tradable`; the instrument
+must belong to its venue and market, otherwise `400 invalid_request`. The
+rate is 10 commands per second per listener (`limits.commands_per_second`),
+above it `429 rate_limited`. A full command queue is `503 unavailable` and
+the command was not sent.
+
+All four answer alike:
+
+```json
+{
+  "accepted": true,
+  "operation_id": "1730294400123-000001",
+  "key": "t-173029440012300001",
+  "connection_id": 12,
+  "instrument": "binance:futures:BTCUSDT"
+}
+```
+
+`operation_id` identifies the operation in the terminal's operations file;
+`key` is the terminal's order key (`t-…`) under which the order will appear
+in `account.orders`; for cancellations `key` is `null`.
+
+### `POST /v1/orders`
+
+```json
+{ "connection_id": 12, "instrument": "binance:futures:BTCUSDT",
+  "side": "buy", "type": "limit", "price": "67000.1", "size": "0.012",
+  "reduce_only": false, "post_only": false, "time_in_force": "gtc",
+  "client_key": "bot-42" }
+```
+
+| Field | Value |
+| --- | --- |
+| `side` | `buy` or `sell` |
+| `type` | `limit` (needs `price`) or `market` (no `price`) |
+| `size` **or** `notional` | amount in the base coin or the quote amount — exactly one |
+| `reduce_only`, `post_only` | optional, default `false` |
+| `time_in_force` | `gtc`, `ioc`, `fok`, `post_only`; absent — the venue's default |
+| `client_key` | the client's idempotency key: a repeat with the same key returns the previous answer and does not duplicate the order (the last thousand are remembered) |
+
+The venue's minimums and steps are checked before sending, as the window
+does: a refusal is `400 invalid_request` with the reason.
+
+### `DELETE /v1/orders/{id}?connection_id=12&instrument=…`
+
+`{id}` is the terminal key `t-…` or the exchange's order id. The
+cancellation goes to the exchange directly; the confirmation arrives through
+the stream.
+
+### `POST /v1/orders/cancel-all`
+
+```json
+{ "connection_id": 12, "instrument": "binance:futures:BTCUSDT" }
+```
+
+Cancel every order of the instrument — the same as the space bar in the
+order book.
+
+### `POST /v1/positions/close`
+
+Same body. Closes the instrument's position the way the window does: on
+futures a market order for the position size with `close_position`, on spot
+"cancel all and close" as one atomic command. Without an open position —
+`400 invalid_request`.
+
+## Stream `/v1/stream` — `market:read` (account topics: `account:read`)
 
 WebSocket at the same address: `ws://127.0.0.1:48180/v1/stream`, the token in
 the handshake header. All frames are text JSON with a `type` field.
@@ -369,12 +551,15 @@ the handshake header. All frames are text JSON with a `type` field.
 ```json
 { "type": "subscribe", "request_id": "r1", "topic": "trades",
   "instrument": "binance:futures:BTCUSDT", "connection_id": 12, "params": {} }
+{ "type": "subscribe", "request_id": "r3", "topic": "account.fills", "connection_id": 12 }
 { "type": "unsubscribe", "request_id": "r2", "sub": "7:trades" }
 ```
 
-`request_id` is optional and is returned in the response as is.
-`connection_id` is chosen by the general rule. `params` apply only to
-`book.top`; other topics ignore them.
+`request_id` is optional and is returned in the response as is. For market
+topics `instrument` is required and `connection_id` is chosen by the general
+rule. For account topics (`account.*`) it is the other way round:
+`connection_id` is required, `instrument` is not used, and the scope is
+`account:read`. `params` apply only to `book.top`; other topics ignore them.
 
 ### Responses and events
 
@@ -387,9 +572,9 @@ the handshake header. All frames are text JSON with a `type` field.
 { "type": "gap",   "sub": "7:trades", "from_seq": 42, "to_seq": 57, "reason": "slow_consumer" }
 ```
 
-- `sub` is the subscription identifier, `"{stream}:{topic}"`. It is the same
-  for every client subscribed to the pair and topic; `unsubscribe` accepts
-  only it.
+- `sub` is the subscription identifier, `"{stream}:{topic}"`; for account
+  topics `"{connection}:account.<topic>"`. It is the same for every client
+  subscribed to the pair and topic; `unsubscribe` accepts only it.
 - `seq` is the event number within the subscription; it grows by one for
   `trades`. For conflated topics gaps in the numbering are normal.
 - `gap` arrives before the first frame after a loss, only for `trades`: the
@@ -408,11 +593,18 @@ the handshake header. All frames are text JSON with a `type` field.
 | `mark_price` | — | `{ "mark_price": "...", "ts": ... }` | conflation |
 | `book.top` | `depth` 1–200 (50), `interval_ms` ≥ 50 (100) | top of the book, as `/market/orderbook` | conflation at the subscriber's interval; `seq` is the book version; the first frame as soon as the book is ready |
 | `clusters` | — | one bucket, as an element of `data` in `/market/clusters` | conflation per bucket; the source flushes every 16 ms |
+| `account.orders` | — | `{ "instrument", "orders": [...], "triggers": [...] }` — orders and triggers of **one instrument** after a change, as in `/account/orders` | conflation: the latest state of the instrument |
+| `account.positions` | — | `{ "instrument", "position": {...} }`, as an element of `/account/positions`; a close is `"position": null` | conflation |
+| `account.balances` | — | one currency's balance, as an element of `/account/balances` | conflation |
+| `account.fills` | — | one fill, as an element of `/account/fills` | a frame per fill; one that does not fit is lost and `seq` shows the gap — re-read `/account/fills` with `since_ts` |
 
 `book.top` parameters are per subscriber; values out of range give
 `error invalid_request` on the request. A `clusters` frame arrives for every
 bucket that changed; an interval change in the terminal shows up in the
-`interval` field.
+`interval` field. Account topics do not touch the exchange: subscribing only
+opens the tap, events flow from the moment the connection sends them; there
+is no snapshot frame on subscribe — the current state is read with the
+`/account/*` operations.
 
 ### Connection life
 
@@ -443,12 +635,17 @@ Printed in `/v1/meta`; a refusal is `error rate_limited` on the request or a
 | subscriptions per connection | 100 |
 | instruments opened only for the API | 50; instruments open in the window do not count |
 | new exchange subscriptions per second | 5 |
+| trading commands per second | 10 |
 
 ## What the API does not do in v1
 
-- It does not write: no orders, no settings, no opening order books in the
-  window. The `api` command source exists for that; the scopes are a separate
-  decision.
+- It does not write settings and does not open order books in the window.
+  Of trading, only plain orders, cancellation and closing a position: trigger
+  orders, leverage, margin mode and grid moves come in later stages.
+- It does not vouch for the outcome at the exchange: `accepted` is accepted
+  by the terminal, the outcome is read from the account.
+- It does not serve account history of past sessions: fills and balances
+  start with the API being switched on; orders and positions are current.
 - It does not choose the cluster interval and does not compute several
   intervals per instrument.
 - It does not serve MOEX data.

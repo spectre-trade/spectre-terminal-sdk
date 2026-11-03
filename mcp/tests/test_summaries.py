@@ -163,3 +163,34 @@ def test_candle_rows_are_compact() -> None:
     assert first[0] == candles.data[0].ts
     assert first[2] == str(candles.data[0].open)
     assert isinstance(first[-1], bool)
+
+
+def test_account_summaries_from_fixtures() -> None:
+    from spectre_terminal.models import (
+        AccountBalances,
+        AccountFills,
+        AccountOrders,
+        AccountPositions,
+    )
+
+    from spectre_terminal_mcp.summaries import account_overview, fills_summary, open_orders_summary
+
+    orders = AccountOrders.from_dict(load_fixture("account_orders.json"))
+    positions = AccountPositions.from_dict(load_fixture("account_positions.json"))
+    balances = AccountBalances.from_dict(load_fixture("account_balances.json"))
+    fills = AccountFills.from_dict(load_fixture("account_fills.json"))
+
+    overview = account_overview(balances, positions, orders)
+    assert overview["open_orders_total"] == 1 and overview["triggers_total"] == 1
+    assert overview["positions"][0]["unrealized_pnl"] == "250"
+    assert all(not isinstance(v, Decimal) for b in overview["balances"] for v in b.values())
+
+    listed = open_orders_summary(orders)
+    assert listed["orders"][0]["remaining"] == "0.012"
+    assert listed["orders"][0]["created_time"].endswith("Z")
+    assert listed["triggers"][0]["rule"] == "price_below_or_equal"
+
+    summary = fills_summary(fills)
+    assert summary["count"] == 1
+    assert summary["fills"][0]["fee"] == "0.32"
+    assert summary["sell_volume"] == "0"

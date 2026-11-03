@@ -29,6 +29,10 @@ ROUTES = {
     "/v1/market/snapshot": "snapshot.json",
     "/v1/market/orderbook": "orderbook.json",
     "/v1/market/clusters": "clusters.json",
+    "/v1/account/orders": "account_orders.json",
+    "/v1/account/positions": "account_positions.json",
+    "/v1/account/balances": "account_balances.json",
+    "/v1/account/fills": "account_fills.json",
 }
 
 
@@ -42,6 +46,7 @@ class FakeApi(ThreadingHTTPServer):
     def __init__(self) -> None:
         super().__init__(("127.0.0.1", 0), _Handler)
         self.requests: list[tuple[str, dict[str, list[str]], dict[str, str]]] = []
+        self.bodies: list[tuple[str, str, dict]] = []
         self.cold_served = False
 
     @property
@@ -82,6 +87,9 @@ class _Handler(BaseHTTPRequestHandler):
                 self.server.cold_served = True
                 self._error(409, "not_active", "clusters are not computed yet")
                 return
+        if url.path.startswith("/v1/account/") and query.get("connection_id") != ["12"]:
+            self._error(404, "not_found", "no such connection")
+            return
         fixture = ROUTES.get(url.path)
         if fixture is None:
             self._error(404, "not_found", "no such operation")
@@ -90,6 +98,42 @@ class _Handler(BaseHTTPRequestHandler):
         if url.path == "/v1/instruments" and "cursor" in query:
             body = {**body, "data": [], "next_cursor": None}
         self._send(200, body)
+
+    def _write(self, method: str) -> None:
+        url = urlparse(self.path)
+        length = int(self.headers.get("Content-Length") or 0)
+        raw = self.rfile.read(length) if length else b""
+        body = json.loads(raw) if raw else {}
+        self.server.bodies.append((method, self.path, body))
+        if self.headers.get("Authorization") != f"Bearer {TOKEN}":
+            self._error(401, "unauthorized", "token does not match")
+            return
+        connection_id = body.get("connection_id") or (
+            int(parse_qs(url.query).get("connection_id", ["0"])[0])
+        )
+        if connection_id == 13:
+            self._error(409, "not_tradable", "connection is read-only")
+            return
+        if connection_id != 12:
+            self._error(404, "not_found", "no such connection")
+            return
+        if (
+            url.path == "/v1/orders"
+            and method == "POST"
+            and body.get("side") not in ("buy", "sell")
+        ):
+            self._error(400, "invalid_request", "side must be buy or sell")
+            return
+        accepted = load_fixture("accepted.json")
+        if method == "DELETE" or url.path.endswith("cancel-all"):
+            accepted = {**accepted, "key": None}
+        self._send(200, accepted)
+
+    def do_POST(self) -> None:  # noqa: N802 — http.server API
+        self._write("POST")
+
+    def do_DELETE(self) -> None:  # noqa: N802 — http.server API
+        self._write("DELETE")
 
 
 @pytest.fixture
