@@ -63,7 +63,11 @@ Minimums and price/size steps are checked before the command leaves, exactly
 as for a click in the window; a refusal is `400 invalid_request` with the
 reason.
 
-`cancel_order` takes the terminal key (`t-…`) or the exchange's id.
+`cancel_order` takes the terminal key (`t-…`) or the exchange's id. Cancel
+only after the order shows an `exchange_id` in `account.orders`: a cancel
+sent while the order is still `pending` reaches the exchange with nothing to
+cancel, and the order stays.
+
 `cancel_all` cancels every order of the instrument, like the space bar in
 the order book. `close_position` closes the way the window does: on futures
 a market order for the position size, on spot "cancel all and close" as one

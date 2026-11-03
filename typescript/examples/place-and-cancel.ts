@@ -60,7 +60,9 @@ try {
       continue;
     }
     const order = frame.data.orders.find((candidate) => candidate.key === key);
-    if (phase === "placing" && order !== undefined) {
+    // Cancel only once the exchange has acknowledged the order (exchange_id
+    // present): a cancel sent while it is still pending finds nothing.
+    if (phase === "placing" && order !== undefined && order.exchange_id !== null) {
       console.log(`open at the exchange: ${order.status}, exchange id ${order.exchange_id ?? "pending"}, ${order.remaining} @ ${order.price}`);
       const cancel = await terminal.cancelOrder({ connectionId, instrument, orderId: key });
       console.log(`cancel accepted by the terminal: operation ${cancel.operation_id}`);

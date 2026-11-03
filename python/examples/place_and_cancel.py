@@ -38,7 +38,12 @@ def far_price(terminal: Terminal, connection_id: int, instrument: str) -> Decima
 
 
 async def watch(stream: Stream, instrument: str, key: str, present: bool) -> bool:
-    """Read ``account.orders`` frames until ``key`` is present (or absent) on ``instrument``."""
+    """Read ``account.orders`` frames until ``key`` is acknowledged (or absent) on ``instrument``.
+
+    "Present" means the exchange has acknowledged the order (it carries an
+    ``exchange_id``): cancelling before that reaches the exchange with nothing
+    to cancel, and the order stays.
+    """
     deadline = asyncio.get_running_loop().time() + WAIT
     while True:
         remaining = deadline - asyncio.get_running_loop().time()
@@ -49,8 +54,11 @@ async def watch(stream: Stream, instrument: str, key: str, present: bool) -> boo
             continue
         if frame.data.instrument != instrument:
             continue
+        acknowledged = {o.key for o in frame.data.orders if o.exchange_id is not None}
         keys = {order.key for order in frame.data.orders}
-        if (key in keys) == present:
+        if present and key in acknowledged:
+            return True
+        if not present and key not in keys:
             return True
 
 
@@ -83,7 +91,9 @@ async def main() -> int:
             print(f"order {key} is on the book at {price}")
         else:
             # the frame may have been conflated away: the HTTP view is the fallback
-            open_keys = {o.key for o in terminal.account_orders(connection_id).data}
+            open_keys = {
+                o.key for o in terminal.account_orders(connection_id).data if o.exchange_id
+            }
             if key not in open_keys:
                 print(f"order {key} did not appear within {WAIT} s: check the window")
                 return 1
