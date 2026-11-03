@@ -27,6 +27,7 @@ from spectre_terminal.models import (
     Health,
     Intervals,
     Level,
+    Leverage,
     Limits,
     MarkPrice,
     Meta,
@@ -65,6 +66,7 @@ PARSERS: dict[str, Any] = {
     "account_balances": AccountBalances.from_dict,
     "account_fills": AccountFills.from_dict,
     "accepted": Accepted.from_dict,
+    "leverage": Leverage.from_dict,
 }
 
 FIXTURE_NAMES = sorted(path.stem for path in FIXTURES.glob("*.json"))

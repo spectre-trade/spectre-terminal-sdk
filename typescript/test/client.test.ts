@@ -55,7 +55,10 @@ async function json(name: string): Promise<Reply> {
 
 /** Routes of the fake terminal; `undefined` means "never answer". */
 async function route(method: string, url: URL, body: unknown): Promise<Reply | undefined> {
-  if (url.pathname.startsWith("/v1/orders") || url.pathname === "/v1/positions/close") {
+  if (url.pathname === "/v1/account/leverage" && method === "GET") {
+    return json("leverage");
+  }
+  if (url.pathname.startsWith("/v1/orders") || WRITE_PATHS.has(url.pathname)) {
     return routeWrite(method, url, body);
   }
   switch (url.pathname) {
@@ -120,6 +123,20 @@ async function route(method: string, url: URL, body: unknown): Promise<Reply | u
   }
 }
 
+/** Writes outside `/v1/orders`; `/v1/account/leverage` is a read on `GET`. */
+const WRITE_PATHS = new Set(["/v1/positions/close", "/v1/account/leverage", "/v1/account/margin-mode"]);
+
+/** Paths whose write is a `POST`; `/v1/orders/{id}` is `DELETE`, `/v1/orders/trigger/{id}` `DELETE` or `PATCH`. */
+const POST_PATHS = new Set([
+  "/v1/orders",
+  "/v1/orders/cancel-all",
+  "/v1/orders/trigger",
+  "/v1/orders/trigger/cancel-all",
+  "/v1/positions/close",
+  "/v1/account/leverage",
+  "/v1/account/margin-mode",
+]);
+
 /** Writes: `connection_id` 409 is a connection that does not trade, 429 a busy listener. */
 async function routeWrite(method: string, url: URL, body: unknown): Promise<Reply> {
   const connectionId =
@@ -132,15 +149,15 @@ async function routeWrite(method: string, url: URL, body: unknown): Promise<Repl
   if (connectionId === 429) {
     return envelope(429, "rate_limited", "10 commands per second");
   }
-  const expected =
-    url.pathname === "/v1/orders" || url.pathname === "/v1/orders/cancel-all" || url.pathname === "/v1/positions/close"
-      ? "POST"
-      : "DELETE";
-  if (method !== expected) {
+  const isTriggerItem = url.pathname.startsWith("/v1/orders/trigger/") && url.pathname !== "/v1/orders/trigger/cancel-all";
+  const allowed = POST_PATHS.has(url.pathname) ? ["POST"] : isTriggerItem ? ["DELETE", "PATCH"] : ["DELETE"];
+  if (!allowed.includes(method)) {
     return envelope(404, "not_found", `${method} ${url.pathname} is not an operation`);
   }
   const accepted = JSON.parse(await fixture("accepted")) as Record<string, unknown>;
-  return { status: 200, body: JSON.stringify({ ...accepted, key: method === "DELETE" ? null : accepted.key }) };
+  const key =
+    url.pathname === "/v1/orders" ? accepted.key : url.pathname === "/v1/orders/trigger" ? "sl_1730294400123" : null;
+  return { status: 200, body: JSON.stringify({ ...accepted, key }) };
 }
 
 let server: Server;
@@ -401,6 +418,110 @@ test("cancelAll and closePosition post the instrument command", async () => {
   assert.equal(last().method, "POST");
   assert.equal(last().url.pathname, "/v1/positions/close");
   assert.deepEqual(last().body, { connection_id: 12, instrument: INSTRUMENT });
+});
+
+test("placeTrigger posts the trigger body; stop fields only when given", async () => {
+  const t = terminal();
+
+  const accepted = await t.placeTrigger({
+    connectionId: 12,
+    instrument: INSTRUMENT,
+    kind: "stop_loss",
+    triggerPrice: "66000",
+    clientKey: "sl-42",
+  });
+  assert.equal(accepted.key, "sl_1730294400123");
+  assert.equal(last().method, "POST");
+  assert.equal(last().url.pathname, "/v1/orders/trigger");
+  assert.deepEqual(last().body, {
+    connection_id: 12,
+    instrument: INSTRUMENT,
+    kind: "stop_loss",
+    trigger_price: "66000",
+    client_key: "sl-42",
+  });
+
+  await t.placeTrigger({
+    connectionId: 12,
+    instrument: INSTRUMENT,
+    kind: "stop",
+    side: "sell",
+    notional: "800",
+    triggerPrice: "66000",
+    rule: "price_below_or_equal",
+  });
+  assert.deepEqual(last().body, {
+    connection_id: 12,
+    instrument: INSTRUMENT,
+    kind: "stop",
+    trigger_price: "66000",
+    side: "sell",
+    notional: "800",
+    rule: "price_below_or_equal",
+  });
+});
+
+test("cancelTrigger, amendTrigger and cancelAllTriggers address the trigger by its numeric id", async () => {
+  const t = terminal();
+
+  let accepted = await t.cancelTrigger({ connectionId: 12, instrument: INSTRUMENT, triggerId: 42 });
+  assert.equal(accepted.key, null);
+  assert.equal(last().method, "DELETE");
+  assert.equal(last().url.pathname, "/v1/orders/trigger/42");
+  assert.deepEqual(params(last().url), { connection_id: "12", instrument: INSTRUMENT });
+  assert.equal(last().body, undefined);
+
+  accepted = await t.amendTrigger({
+    connectionId: 12,
+    instrument: INSTRUMENT,
+    triggerId: "42",
+    kind: "stop",
+    side: "sell",
+    triggerPrice: "65500",
+  });
+  assert.equal(accepted.key, null);
+  assert.equal(last().method, "PATCH");
+  assert.equal(last().url.pathname, "/v1/orders/trigger/42");
+  assert.equal(last().headers["content-type"], "application/json");
+  assert.deepEqual(last().body, {
+    connection_id: 12,
+    instrument: INSTRUMENT,
+    kind: "stop",
+    trigger_price: "65500",
+    side: "sell",
+  });
+
+  await t.cancelAllTriggers({ connectionId: 12, instrument: INSTRUMENT });
+  assert.equal(last().method, "POST");
+  assert.equal(last().url.pathname, "/v1/orders/trigger/cancel-all");
+  assert.deepEqual(last().body, { connection_id: 12, instrument: INSTRUMENT });
+});
+
+test("leverage reads the cache; setLeverage and setMarginMode post the command", async () => {
+  const t = terminal();
+
+  const leverage = await t.leverage({ connectionId: 12, instrument: INSTRUMENT });
+  assert.equal(last().method, "GET");
+  assert.equal(last().url.pathname, "/v1/account/leverage");
+  assert.deepEqual(params(last().url), { connection_id: "12", instrument: INSTRUMENT });
+  assert.equal(leverage.leverage, 10);
+  assert.equal(leverage.max_leverage, 125);
+  assert.equal(leverage.mode, "manual");
+  assert.equal(leverage.margin_mode, "cross");
+
+  let accepted = await t.setLeverage({ connectionId: 12, instrument: INSTRUMENT, leverage: 20 });
+  assert.equal(accepted.key, null);
+  assert.equal(last().method, "POST");
+  assert.equal(last().url.pathname, "/v1/account/leverage");
+  assert.deepEqual(last().body, { connection_id: 12, instrument: INSTRUMENT, leverage: 20 });
+
+  await t.setLeverage({ connectionId: 12, instrument: INSTRUMENT, mode: "max" });
+  assert.deepEqual(last().body, { connection_id: 12, instrument: INSTRUMENT, mode: "max" });
+
+  accepted = await t.setMarginMode({ connectionId: 12, instrument: INSTRUMENT, marginMode: "isolated" });
+  assert.equal(accepted.key, null);
+  assert.equal(last().url.pathname, "/v1/account/margin-mode");
+  assert.deepEqual(last().body, { connection_id: 12, instrument: INSTRUMENT, margin_mode: "isolated" });
 });
 
 test("not_tradable and rate_limited on writes are ApiErrors without the token", async () => {

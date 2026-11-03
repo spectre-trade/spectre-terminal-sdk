@@ -21,4 +21,9 @@ is a major bump and happens only with a new API version of the terminal.
   `account_fills` and the `account.*` stream topics in both clients.
 - Trading: `place_order`, `cancel_order`, `cancel_all`, `close_position`
   in both clients; `accepted` answers carry the terminal's order key.
+- Trigger orders and leverage: `place_trigger`, `cancel_trigger`,
+  `cancel_all_triggers`, `amend_trigger`, `leverage`, `set_leverage`,
+  `set_margin_mode` in both clients, the `Leverage` model, and the MCP tools
+  `leverage`, `place_trigger`, `cancel_trigger`, `amend_trigger`,
+  `cancel_all_triggers`, `set_leverage`, `set_margin_mode`.
 - The contract copy (`contract/`) pinned to a terminal revision.

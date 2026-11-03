@@ -33,6 +33,7 @@ ROUTES = {
     "/v1/account/positions": "account_positions.json",
     "/v1/account/balances": "account_balances.json",
     "/v1/account/fills": "account_fills.json",
+    "/v1/account/leverage": "leverage.json",
 }
 
 
@@ -125,12 +126,17 @@ class _Handler(BaseHTTPRequestHandler):
             self._error(400, "invalid_request", "side must be buy or sell")
             return
         accepted = load_fixture("accepted.json")
-        if method == "DELETE" or url.path.endswith("cancel-all"):
+        if url.path == "/v1/orders/trigger":
+            accepted = {**accepted, "key": "sl_1730294400123"}
+        elif url.path != "/v1/orders":
             accepted = {**accepted, "key": None}
         self._send(200, accepted)
 
     def do_POST(self) -> None:  # noqa: N802 — http.server API
         self._write("POST")
+
+    def do_PATCH(self) -> None:  # noqa: N802 — http.server API
+        self._write("PATCH")
 
     def do_DELETE(self) -> None:  # noqa: N802 — http.server API
         self._write("DELETE")

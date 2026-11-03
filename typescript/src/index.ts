@@ -16,7 +16,9 @@
 export { Terminal, SUPPORTED_API_VERSION } from "./client.ts";
 export type {
   AccountFillsOptions,
+  AmendTriggerOptions,
   CancelOrderOptions,
+  CancelTriggerOptions,
   CandlesOptions,
   ConnectionOptions,
   DiscoverOptions,
@@ -24,6 +26,9 @@ export type {
   InstrumentsOptions,
   OrderbookOptions,
   PlaceOrderOptions,
+  PlaceTriggerOptions,
+  SetLeverageOptions,
+  SetMarginModeOptions,
   StreamOptions,
   TerminalOptions,
   TradesOptions,

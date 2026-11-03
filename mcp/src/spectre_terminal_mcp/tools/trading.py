@@ -1,4 +1,4 @@
-"""Trading tools: place, cancel, cancel all, close — the same commands the window sends.
+"""Trading tools: orders, triggers, position close, leverage — the same commands the window sends.
 
 These are the only tools that change anything, and they say so in their
 annotations (``destructive_hint``, not read-only), so an MCP client may
@@ -140,4 +140,153 @@ def register(server: MCPServer, provider: TerminalProvider) -> None:
         """
         with provider.call() as terminal:
             accepted = terminal.close_position(connection_id, instrument)
+        return accepted_dict(accepted)
+
+    @server.tool(name="place_trigger", annotations=TRADING)
+    def place_trigger(
+        connection_id: Annotated[int, _CONNECTION],
+        instrument: Annotated[str, _INSTRUMENT],
+        kind: Annotated[
+            str,
+            Field(
+                description=(
+                    "stop_loss or take_profit (placed on the open position: its side, size and "
+                    "rule come from the position) or stop (your own side and notional)"
+                )
+            ),
+        ],
+        trigger_price: Annotated[str, Field(description="Trigger price as a decimal string")],
+        client_key: Annotated[
+            str,
+            Field(
+                description=(
+                    "Your idempotency key for this intent. A retry with the same key returns "
+                    "the previous answer and places nothing."
+                )
+            ),
+        ],
+        side: Annotated[str | None, Field(description="stop only: buy or sell")] = None,
+        notional: Annotated[
+            str | None, Field(description="stop only: amount in the quote currency, decimal string")
+        ] = None,
+        rule: Annotated[
+            str | None,
+            Field(
+                description=(
+                    "stop only: price_above_or_equal or price_below_or_equal; omitted means "
+                    "above the market for a buy, below for a sell"
+                )
+            ),
+        ] = None,
+    ) -> dict[str, Any]:
+        """Place a stop loss, take profit or stop the way the window does. Answers "accepted".
+
+        The returned ``key`` (``sl_…``, ``tp_…``, ``stop_…``) shows up as
+        ``client_id`` of the trigger in ``open_orders``; cancel or move it by
+        the numeric ``id`` from there. Refused without an open position for
+        ``stop_loss``/``take_profit``, and with ``unsupported`` on a venue
+        without trigger orders in the terminal.
+        """
+        with provider.call() as terminal:
+            accepted = terminal.place_trigger(
+                connection_id,
+                instrument,
+                kind=kind,
+                trigger_price=trigger_price,
+                side=side,
+                notional=notional,
+                rule=rule,
+                client_key=client_key,
+            )
+        return accepted_dict(accepted)
+
+    @server.tool(name="cancel_trigger", annotations=TRADING)
+    def cancel_trigger(
+        connection_id: Annotated[int, _CONNECTION],
+        instrument: Annotated[str, _INSTRUMENT],
+        trigger_id: Annotated[
+            str, Field(description="The numeric id of the trigger from open_orders")
+        ],
+    ) -> dict[str, Any]:
+        """Cancel one trigger order by its numeric id from ``open_orders``. Answers "accepted"."""
+        with provider.call() as terminal:
+            accepted = terminal.cancel_trigger(connection_id, instrument, trigger_id)
+        return accepted_dict(accepted)
+
+    @server.tool(name="cancel_all_triggers", annotations=TRADING)
+    def cancel_all_triggers(
+        connection_id: Annotated[int, _CONNECTION],
+        instrument: Annotated[str, _INSTRUMENT],
+    ) -> dict[str, Any]:
+        """Cancel every trigger order of the instrument; plain orders stay. Answers "accepted"."""
+        with provider.call() as terminal:
+            accepted = terminal.cancel_all_triggers(connection_id, instrument)
+        return accepted_dict(accepted)
+
+    @server.tool(name="amend_trigger", annotations=TRADING)
+    def amend_trigger(
+        connection_id: Annotated[int, _CONNECTION],
+        instrument: Annotated[str, _INSTRUMENT],
+        trigger_id: Annotated[
+            str, Field(description="The numeric id of the trigger from open_orders")
+        ],
+        kind: Annotated[
+            str, Field(description="stop_loss, take_profit or stop — the trigger's type")
+        ],
+        trigger_price: Annotated[str, Field(description="New trigger price as a decimal string")],
+        side: Annotated[str | None, Field(description="stop only: buy or sell")] = None,
+        rule: Annotated[
+            str | None,
+            Field(description="stop only: price_above_or_equal or price_below_or_equal"),
+        ] = None,
+    ) -> dict[str, Any]:
+        """Move a trigger to a new price (cancel, then place). Answers "accepted"."""
+        with provider.call() as terminal:
+            accepted = terminal.amend_trigger(
+                connection_id,
+                instrument,
+                trigger_id,
+                kind=kind,
+                trigger_price=trigger_price,
+                side=side,
+                rule=rule,
+            )
+        return accepted_dict(accepted)
+
+    @server.tool(name="set_leverage", annotations=TRADING)
+    def set_leverage(
+        connection_id: Annotated[int, _CONNECTION],
+        instrument: Annotated[str, _INSTRUMENT],
+        leverage: Annotated[
+            int | None,
+            Field(description="Leverage as an integer of at least 1; or give mode", ge=1),
+        ] = None,
+        mode: Annotated[
+            str | None, Field(description="max or smart (the terminal's modes); or give leverage")
+        ] = None,
+    ) -> dict[str, Any]:
+        """Set the leverage of a futures instrument the way the window does. Answers "accepted".
+
+        Exactly one of ``leverage`` and ``mode``. Read the applied value with
+        ``leverage`` after the exchange answered.
+        """
+        with provider.call() as terminal:
+            accepted = terminal.set_leverage(
+                connection_id, instrument, leverage=leverage, mode=mode
+            )
+        return accepted_dict(accepted)
+
+    @server.tool(name="set_margin_mode", annotations=TRADING)
+    def set_margin_mode(
+        connection_id: Annotated[int, _CONNECTION],
+        instrument: Annotated[str, _INSTRUMENT],
+        margin_mode: Annotated[str, Field(description="cross or isolated")],
+    ) -> dict[str, Any]:
+        """Set the margin mode of a futures instrument. Answers "accepted".
+
+        The exchange refuses the change while a position is open, as in the
+        window; the accepted answer does not know that yet.
+        """
+        with provider.call() as terminal:
+            accepted = terminal.set_margin_mode(connection_id, instrument, margin_mode)
         return accepted_dict(accepted)

@@ -478,10 +478,78 @@ export interface PlaceOrderRequest {
   client_key?: string;
 }
 
-/** The body of `POST /v1/orders/cancel-all` and `POST /v1/positions/close`. */
+/** The body of `POST /v1/orders/cancel-all`, `POST /v1/orders/trigger/cancel-all` and `POST /v1/positions/close`. */
 export interface InstrumentCommandRequest {
   connection_id: number;
   instrument: InstrumentAddress;
+}
+
+/**
+ * The body of `POST /v1/orders/trigger`. `stop_loss` and `take_profit` are
+ * placed on the open position (side, size and rule come from it); a `stop`
+ * carries its own `side`, `notional` and optional `rule`.
+ */
+export interface PlaceTriggerRequest {
+  connection_id: number;
+  instrument: InstrumentAddress;
+  kind: TriggerType;
+  trigger_price: Decimal;
+  /** `stop` only. */
+  side?: Side;
+  /** `stop` only: the quote amount. */
+  notional?: Decimal;
+  /** `stop` only; absent means above the market for a buy, below for a sell. */
+  rule?: TriggerRule;
+  /** Idempotency key, as for `POST /v1/orders`. */
+  client_key?: string;
+}
+
+/** The body of `PATCH /v1/orders/trigger/{id}`: a new trigger price. */
+export interface AmendTriggerRequest {
+  connection_id: number;
+  instrument: InstrumentAddress;
+  kind: TriggerType;
+  trigger_price: Decimal;
+  /** `stop` only. */
+  side?: Side;
+  /** `stop` only. */
+  rule?: TriggerRule;
+}
+
+/** The terminal's leverage mode of an instrument, not the exchange's. */
+export type LeverageMode = "manual" | "max" | "smart";
+
+/** Margin mode of a futures instrument. */
+export type MarginMode = "cross" | "isolated";
+
+/**
+ * `GET /v1/account/leverage`: leverage and margin mode of one futures
+ * instrument, from the terminal's cache. An instrument the terminal has not
+ * touched yet answers `409 not_active`.
+ */
+export interface Leverage {
+  connection_id: number;
+  instrument: InstrumentAddress;
+  leverage: number;
+  max_leverage: number;
+  mode: LeverageMode;
+  margin_mode: MarginMode;
+}
+
+/** The body of `POST /v1/account/leverage`: exactly one of `leverage` and `mode`. */
+export interface SetLeverageRequest {
+  connection_id: number;
+  instrument: InstrumentAddress;
+  /** An integer of at least 1. */
+  leverage?: number;
+  mode?: "max" | "smart";
+}
+
+/** The body of `POST /v1/account/margin-mode`. */
+export interface SetMarginModeRequest {
+  connection_id: number;
+  instrument: InstrumentAddress;
+  margin_mode: MarginMode;
 }
 
 /**
@@ -493,7 +561,11 @@ export interface Accepted {
   accepted: boolean;
   /** The operation in the terminal's operations file. */
   operation_id: string;
-  /** The terminal's order key under which the order appears in `account.orders`; `null` for cancellations. */
+  /**
+   * The terminal's key under which the order (`t-…`) or trigger (`sl_…`,
+   * `tp_…`, `stop_…`) appears in `account.orders`; `null` for cancellations,
+   * amendments and leverage.
+   */
   key: string | null;
   connection_id: number;
   instrument: InstrumentAddress;

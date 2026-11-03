@@ -2,8 +2,8 @@
 
 An [MCP](https://modelcontextprotocol.io) server that lets an AI agent — Claude
 Code, Claude Desktop, Cursor, any MCP client — read market data from a
-running [Spectre Terminal](https://spectre.trade) on the same machine. Thin,
-read-only, stdio; built on the `spectre-terminal` Python client.
+running [Spectre Terminal](https://spectre.trade) on the same machine, and
+trade through it. Thin, stdio; built on the `spectre-terminal` Python client.
 
 ```bash
 pip install spectre-terminal-mcp
@@ -55,9 +55,13 @@ running; the first tool call then answers `terminal_unreachable`.
 | `cancel_order` | cancels one order by key or exchange id |
 | `cancel_all_orders` | cancels every order of an instrument |
 | `close_position` | closes a position the way the window does |
+| `leverage` | leverage, its maximum, the terminal's mode and the margin mode of a futures instrument |
+| `place_trigger` | places a stop loss or take profit on the open position, or a stop; needs a `client_key` |
+| `cancel_trigger`, `amend_trigger`, `cancel_all_triggers` | cancel, move or clear trigger orders by their numeric id |
+| `set_leverage`, `set_margin_mode` | leverage (a number, or `max`/`smart`) and `cross`/`isolated` |
 
 Read tools are read-only and idempotent and say so in their annotations; the
-four trading tools are annotated as destructive, so an MCP client may ask the
+ten trading tools are annotated as destructive, so an MCP client may ask the
 user before each call. Trading answers mean "accepted by the terminal", not
 "filled": the outcome is read from `open_orders` and `recent_fills`.
 Prices and sizes are decimal strings; times are UTC milliseconds plus an ISO

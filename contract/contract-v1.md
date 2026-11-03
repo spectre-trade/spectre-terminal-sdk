@@ -74,7 +74,7 @@ There is no CORS layer on purpose: a browser page must not reach the API.
 | `not_found` | 404 | no such operation, connection, or no connection for the instrument |
 | `invalid_request` | 400 | parameters: bad instrument, interval, depth, foreign `connection_id` |
 | `unsupported` | 501 | the venue's data is not relayed (MOEX) or the terminal was built without the market-data tap |
-| `not_active` | 409 | clusters of the instrument are not being computed yet (see `/market/clusters`) |
+| `not_active` | 409 | clusters of the instrument are not being computed yet (see `/market/clusters`) or the instrument's leverage is not loaded yet (see `/account/leverage`) |
 | `rate_limited` | 429 | ceiling on connections, subscriptions, instruments, subscription rate or trading commands |
 | `not_tradable` | 409 | the connection does not trade: disabled, read-only or without credentials |
 | `unavailable` | 503 | storage, exchange or coordinator did not answer; no data yet |
@@ -482,7 +482,7 @@ rate is 10 commands per second per listener (`limits.commands_per_second`),
 above it `429 rate_limited`. A full command queue is `503 unavailable` and
 the command was not sent.
 
-All four answer alike:
+Every trading operation — triggers and leverage below included — answers alike:
 
 ```json
 {
@@ -496,7 +496,7 @@ All four answer alike:
 
 `operation_id` identifies the operation in the terminal's operations file;
 `key` is the terminal's order key (`t-…`) under which the order will appear
-in `account.orders`; for cancellations `key` is `null`.
+in `account.orders`; for cancellations, amendments and leverage `key` is `null`.
 
 ### `POST /v1/orders`
 
@@ -540,6 +540,107 @@ Same body. Closes the instrument's position the way the window does: on
 futures a market order for the position size with `close_position`, on spot
 "cancel all and close" as one atomic command. Without an open position —
 `400 invalid_request`.
+
+### Trigger orders
+
+The same services the window uses: a stop loss and a take profit are placed
+**on the open position** (side, size and rule come from it; without a
+position — `400 invalid_request`), a stop with its own side and amount. On a
+venue for which the terminal keeps no trigger orders all four operations
+answer `501 unsupported`. The trigger appears in `triggers` of
+`/v1/account/orders` and of the `account.orders` topic: the key from
+`accepted.key` is its `client_id`, and it is cancelled and amended by the
+numeric `id` from there.
+
+#### `POST /v1/orders/trigger`
+
+```json
+{ "connection_id": 12, "instrument": "binance:futures:BTCUSDT",
+  "kind": "stop_loss", "trigger_price": "66000", "client_key": "sl-42" }
+{ "connection_id": 12, "instrument": "binance:futures:BTCUSDT",
+  "kind": "stop", "side": "sell", "notional": "800", "trigger_price": "66000",
+  "rule": "price_below_or_equal" }
+```
+
+| Field | Value |
+| --- | --- |
+| `kind` | `stop_loss`, `take_profit` — on the open position; `stop` — its own |
+| `trigger_price` | the trigger price |
+| `side` | `stop` only: `buy` or `sell` |
+| `notional` | `stop` only: the quote amount |
+| `rule` | `stop` only: `price_above_or_equal` or `price_below_or_equal`; absent — above the market for a buy, below for a sell |
+| `client_key` | idempotency key, as for `POST /v1/orders` |
+
+`key` in the answer is the trigger's key (`sl_…`, `tp_…`, `stop_…`).
+
+#### `DELETE /v1/orders/trigger/{id}?connection_id=12&instrument=…`
+
+`{id}` is the numeric `id` of the trigger from `/v1/account/orders`; a
+`t-…` or `sl_…` key is not accepted here (`400 invalid_request`).
+
+#### `PATCH /v1/orders/trigger/{id}`
+
+```json
+{ "connection_id": 12, "instrument": "binance:futures:BTCUSDT",
+  "kind": "stop_loss", "trigger_price": "65500" }
+```
+
+A new trigger price by the same sequential replacement the window does: the
+old trigger is cancelled, a new one placed. `kind` is required; a `stop`
+also needs `side` and takes an optional `rule`.
+
+#### `POST /v1/orders/trigger/cancel-all`
+
+```json
+{ "connection_id": 12, "instrument": "binance:futures:BTCUSDT" }
+```
+
+Cancel every trigger of the instrument. Plain orders are not touched — they
+are cancelled by `POST /v1/orders/cancel-all`.
+
+## Leverage and margin mode
+
+Futures operations: spot has no leverage.
+
+### `GET /v1/account/leverage?connection_id=12&instrument=…` — `account:read`
+
+```json
+{
+  "connection_id": 12,
+  "instrument": "binance:futures:BTCUSDT",
+  "leverage": 10,
+  "max_leverage": 125,
+  "mode": "manual",
+  "margin_mode": "cross"
+}
+```
+
+`mode` is `manual`, `max` or `smart` (the terminal's mode, not the
+exchange's); `margin_mode` is `cross` or `isolated`. Read from the
+terminal's cache, which the window's instrument selection and a leverage
+change fill: an instrument the terminal has not touched yet answers
+`409 not_active` — open it in the window or set the leverage with the `POST`
+below.
+
+### `POST /v1/account/leverage` — `trading:write`
+
+```json
+{ "connection_id": 12, "instrument": "binance:futures:BTCUSDT", "leverage": 20 }
+{ "connection_id": 12, "instrument": "binance:futures:BTCUSDT", "mode": "max" }
+```
+
+Exactly one of the two: `leverage` (an integer ≥ 1) or `mode` (`max`,
+`smart`). The answer is `accepted`; the applied value shows in `GET` after
+the exchange answered.
+
+### `POST /v1/account/margin-mode` — `trading:write`
+
+```json
+{ "connection_id": 12, "instrument": "binance:futures:BTCUSDT", "margin_mode": "isolated" }
+```
+
+`cross` or `isolated`. Changing it with an open position is refused by the
+exchange, as in the window — the `accepted` answer does not know that.
 
 ## Stream `/v1/stream` — `market:read` (account topics: `account:read`)
 
@@ -640,8 +741,8 @@ Printed in `/v1/meta`; a refusal is `error rate_limited` on the request or a
 ## What the API does not do in v1
 
 - It does not write settings and does not open order books in the window.
-  Of trading, only plain orders, cancellation and closing a position: trigger
-  orders, leverage, margin mode and grid moves come in later stages.
+  Of trading, there is no grid move by dragging (`MoveOrderGrid`) and no
+  trading on MOEX.
 - It does not vouch for the outcome at the exchange: `accepted` is accepted
   by the terminal, the outcome is read from the account.
 - It does not serve account history of past sessions: fills and balances

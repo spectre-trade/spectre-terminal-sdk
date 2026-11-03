@@ -24,25 +24,33 @@ import type {
   AccountFills,
   AccountOrders,
   AccountPositions,
+  AmendTriggerRequest,
   Candles,
   Clusters,
   Connection,
   Decimal,
   Health,
-  InstrumentAddress,
   Instrument,
+  InstrumentAddress,
   InstrumentCommandRequest,
   InstrumentsPage,
   Intervals,
+  Leverage,
   List,
+  MarginMode,
   Meta,
   Orderbook,
   OrderType,
   PlaceOrderRequest,
+  PlaceTriggerRequest,
+  SetLeverageRequest,
+  SetMarginModeRequest,
   Side,
   Snapshot,
   TimeInForce,
   Trades,
+  TriggerRule,
+  TriggerType,
 } from "./types.ts";
 
 /** The API version this client speaks. */
@@ -167,10 +175,65 @@ export interface CancelOrderOptions {
   orderId: string;
 }
 
-/** Options of {@link Terminal.cancelAll} and {@link Terminal.closePosition}. */
+/** Options of {@link Terminal.cancelAll}, {@link Terminal.cancelAllTriggers}, {@link Terminal.closePosition} and {@link Terminal.leverage}. */
 export interface InstrumentCommandOptions {
   connectionId: number;
   instrument: InstrumentAddress;
+}
+
+/** Options of {@link Terminal.placeTrigger}. */
+export interface PlaceTriggerOptions {
+  connectionId: number;
+  instrument: InstrumentAddress;
+  /** `stop_loss` and `take_profit` go on the open position; `stop` is its own order. */
+  kind: TriggerType;
+  triggerPrice: Decimal;
+  /** `stop` only. */
+  side?: Side;
+  /** `stop` only: the quote amount. */
+  notional?: Decimal;
+  /** `stop` only; absent means above the market for a buy, below for a sell. */
+  rule?: TriggerRule;
+  /** Idempotency key, as for {@link Terminal.placeOrder}. */
+  clientKey?: string;
+}
+
+/** Options of {@link Terminal.cancelTrigger}. */
+export interface CancelTriggerOptions {
+  connectionId: number;
+  instrument: InstrumentAddress;
+  /** The numeric `id` of the trigger from `accountOrders().triggers`. */
+  triggerId: string | number;
+}
+
+/** Options of {@link Terminal.amendTrigger}. */
+export interface AmendTriggerOptions {
+  connectionId: number;
+  instrument: InstrumentAddress;
+  /** The numeric `id` of the trigger from `accountOrders().triggers`. */
+  triggerId: string | number;
+  kind: TriggerType;
+  triggerPrice: Decimal;
+  /** `stop` only. */
+  side?: Side;
+  /** `stop` only. */
+  rule?: TriggerRule;
+}
+
+/** Options of {@link Terminal.setLeverage}: exactly one of `leverage` and `mode`. */
+export interface SetLeverageOptions {
+  connectionId: number;
+  instrument: InstrumentAddress;
+  /** An integer of at least 1. */
+  leverage?: number;
+  mode?: "max" | "smart";
+}
+
+/** Options of {@link Terminal.setMarginMode}. */
+export interface SetMarginModeOptions {
+  connectionId: number;
+  instrument: InstrumentAddress;
+  marginMode: MarginMode;
 }
 
 /** Options of {@link Terminal.stream}. */
@@ -181,7 +244,7 @@ export interface StreamOptions {
 
 type Query = Record<string, string | number | undefined>;
 
-type Method = "GET" | "POST" | "DELETE";
+type Method = "GET" | "POST" | "DELETE" | "PATCH";
 
 interface RequestOptions {
   query?: Query;
@@ -455,6 +518,104 @@ export class Terminal {
    */
   closePosition(options: InstrumentCommandOptions): Promise<Accepted> {
     return this.#request<Accepted>("POST", "positions/close", { body: instrumentCommand(options) });
+  }
+
+  /**
+   * `POST /v1/orders/trigger` (`trading:write`): a stop loss, take profit or
+   * stop, placed by the same services the window uses. `stop_loss` and
+   * `take_profit` go on the open position (side, size and rule come from
+   * it; `invalid_request` without one); a `stop` needs `side` and
+   * `notional`. `key` in the answer is the trigger's key (`sl_…`, `tp_…`,
+   * `stop_…`), which shows up as `client_id` of the trigger in
+   * {@link accountOrders}; cancelling and amending use the numeric `id` from
+   * there. `unsupported` (501) on a venue without trigger orders in the terminal.
+   */
+  placeTrigger(options: PlaceTriggerOptions): Promise<Accepted> {
+    const body: PlaceTriggerRequest = {
+      connection_id: options.connectionId,
+      instrument: options.instrument,
+      kind: options.kind,
+      trigger_price: options.triggerPrice,
+      side: options.side,
+      notional: options.notional,
+      rule: options.rule,
+      client_key: options.clientKey,
+    };
+    return this.#request<Accepted>("POST", "orders/trigger", { body });
+  }
+
+  /** `DELETE /v1/orders/trigger/{id}` (`trading:write`): cancel one trigger by its numeric `id`. */
+  cancelTrigger(options: CancelTriggerOptions): Promise<Accepted> {
+    return this.#request<Accepted>("DELETE", `orders/trigger/${encodeURIComponent(String(options.triggerId))}`, {
+      query: { connection_id: options.connectionId, instrument: options.instrument },
+    });
+  }
+
+  /** `POST /v1/orders/trigger/cancel-all` (`trading:write`): cancel every trigger of the instrument; plain orders stay. */
+  cancelAllTriggers(options: InstrumentCommandOptions): Promise<Accepted> {
+    return this.#request<Accepted>("POST", "orders/trigger/cancel-all", { body: instrumentCommand(options) });
+  }
+
+  /**
+   * `PATCH /v1/orders/trigger/{id}` (`trading:write`): move a trigger to a
+   * new price — the window's sequential replacement, cancel then place.
+   * `kind` is required; a `stop` also needs its `side`. `key` is `null`.
+   */
+  amendTrigger(options: AmendTriggerOptions): Promise<Accepted> {
+    const body: AmendTriggerRequest = {
+      connection_id: options.connectionId,
+      instrument: options.instrument,
+      kind: options.kind,
+      trigger_price: options.triggerPrice,
+      side: options.side,
+      rule: options.rule,
+    };
+    return this.#request<Accepted>("PATCH", `orders/trigger/${encodeURIComponent(String(options.triggerId))}`, {
+      body,
+    });
+  }
+
+  /**
+   * `GET /v1/account/leverage` (`account:read`): leverage and margin mode of
+   * a futures instrument, from the terminal's cache. An instrument the
+   * terminal has not touched yet is `not_active` (409): open it in the window
+   * or call {@link setLeverage}, which is how it enters the cache.
+   */
+  leverage(options: InstrumentCommandOptions): Promise<Leverage> {
+    return this.#get<Leverage>("account/leverage", {
+      connection_id: options.connectionId,
+      instrument: options.instrument,
+    });
+  }
+
+  /**
+   * `POST /v1/account/leverage` (`trading:write`): set the leverage the way
+   * the window does — exactly one of `leverage` (an integer ≥ 1) and `mode`
+   * (`max`, `smart`). The applied value shows in {@link leverage} after the
+   * exchange answered.
+   */
+  setLeverage(options: SetLeverageOptions): Promise<Accepted> {
+    const body: SetLeverageRequest = {
+      connection_id: options.connectionId,
+      instrument: options.instrument,
+      leverage: options.leverage,
+      mode: options.mode,
+    };
+    return this.#request<Accepted>("POST", "account/leverage", { body });
+  }
+
+  /**
+   * `POST /v1/account/margin-mode` (`trading:write`): `cross` or `isolated`.
+   * Changing it with an open position is refused by the exchange, as in the
+   * window; the `accepted` answer does not know that yet.
+   */
+  setMarginMode(options: SetMarginModeOptions): Promise<Accepted> {
+    const body: SetMarginModeRequest = {
+      connection_id: options.connectionId,
+      instrument: options.instrument,
+      margin_mode: options.marginMode,
+    };
+    return this.#request<Accepted>("POST", "account/margin-mode", { body });
   }
 
   /** Open `/v1/stream`. Node only: the token goes in the handshake header. */

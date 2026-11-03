@@ -40,6 +40,7 @@ from .models import (
     Health,
     Instrument,
     Intervals,
+    Leverage,
     Meta,
     OrderBook,
     Page,
@@ -488,6 +489,168 @@ class Terminal:
         """
         body = {"connection_id": int(connection_id), "instrument": instrument}
         return Accepted.from_dict(self._send("POST", "/positions/close", body))
+
+    # --- trigger orders (trading:write) -------------------------------------
+
+    def place_trigger(
+        self,
+        connection_id: int,
+        instrument: str,
+        *,
+        kind: str,
+        trigger_price: Money,
+        side: str | None = None,
+        notional: Money | None = None,
+        rule: str | None = None,
+        client_key: str | None = None,
+    ) -> Accepted:
+        """``POST /v1/orders/trigger``: a stop loss, take profit or stop, as the window places them.
+
+        ``kind`` is ``stop_loss`` or ``take_profit`` — placed **on the open
+        position** (side, size and rule come from it; without a position
+        ``ApiError`` ``invalid_request``) — or ``stop``, which needs ``side``
+        (``buy``/``sell``) and ``notional`` (the quote amount) and takes an
+        optional ``rule`` (``price_above_or_equal`` or
+        ``price_below_or_equal``; absent means above the market for a buy,
+        below for a sell). ``client_key`` is an idempotency key as in
+        :meth:`place_order`.
+
+        ``Accepted.key`` is the trigger's key (``sl_…``, ``tp_…``,
+        ``stop_…``), which shows up as ``client_id`` of the trigger in
+        :meth:`account_orders`; cancelling and amending use the numeric
+        ``id`` from there. A venue without trigger orders in the terminal is
+        ``ApiError`` ``unsupported``.
+        """
+        if kind == "stop":
+            if side is None or notional is None:
+                raise ValueError("a stop needs side and notional")
+        elif side is not None or notional is not None or rule is not None:
+            raise ValueError("side, notional and rule belong to kind='stop' only")
+        body: dict[str, Any] = {
+            "connection_id": int(connection_id),
+            "instrument": instrument,
+            "kind": kind,
+            "trigger_price": _money(trigger_price),
+        }
+        if side is not None:
+            body["side"] = side
+        if notional is not None:
+            body["notional"] = _money(notional)
+        if rule is not None:
+            body["rule"] = rule
+        if client_key is not None:
+            body["client_key"] = client_key
+        return Accepted.from_dict(self._send("POST", "/orders/trigger", body))
+
+    def cancel_trigger(
+        self, connection_id: int, instrument: str, trigger_id: int | str
+    ) -> Accepted:
+        """``DELETE /v1/orders/trigger/{id}``: cancel one trigger by its numeric ``id``.
+
+        The ``id`` is the one from :meth:`account_orders`. ``Accepted.key`` is ``None``.
+        """
+        path = "/orders/trigger/" + urllib.parse.quote(str(trigger_id), safe="")
+        body = self._send(
+            "DELETE", path, None, connection_id=int(connection_id), instrument=instrument
+        )
+        return Accepted.from_dict(body)
+
+    def cancel_all_triggers(self, connection_id: int, instrument: str) -> Accepted:
+        """``POST /v1/orders/trigger/cancel-all``: cancel every trigger of the instrument.
+
+        Plain orders stay; they go through :meth:`cancel_all`.
+        """
+        body = {"connection_id": int(connection_id), "instrument": instrument}
+        return Accepted.from_dict(self._send("POST", "/orders/trigger/cancel-all", body))
+
+    def amend_trigger(
+        self,
+        connection_id: int,
+        instrument: str,
+        trigger_id: int | str,
+        *,
+        kind: str,
+        trigger_price: Money,
+        side: str | None = None,
+        rule: str | None = None,
+    ) -> Accepted:
+        """``PATCH /v1/orders/trigger/{id}``: move a trigger to a new price.
+
+        The window's sequential replacement: the old trigger is cancelled,
+        a new one placed. ``kind`` is required (``stop_loss``,
+        ``take_profit`` or ``stop``); a ``stop`` also needs ``side`` and
+        takes an optional ``rule``. ``Accepted.key`` is ``None``.
+        """
+        if kind == "stop":
+            if side is None:
+                raise ValueError("amending a stop needs its side")
+        elif side is not None or rule is not None:
+            raise ValueError("side and rule belong to kind='stop' only")
+        body: dict[str, Any] = {
+            "connection_id": int(connection_id),
+            "instrument": instrument,
+            "kind": kind,
+            "trigger_price": _money(trigger_price),
+        }
+        if side is not None:
+            body["side"] = side
+        if rule is not None:
+            body["rule"] = rule
+        path = "/orders/trigger/" + urllib.parse.quote(str(trigger_id), safe="")
+        return Accepted.from_dict(self._send("PATCH", path, body))
+
+    # --- leverage and margin mode ---------------------------------------------
+
+    def leverage(self, connection_id: int, instrument: str) -> Leverage:
+        """``GET /v1/account/leverage`` (``account:read``): leverage and margin mode.
+
+        Read from the terminal's cache: an instrument the terminal has not
+        touched yet is ``ApiError`` ``not_active`` — open it in the window or
+        call :meth:`set_leverage`, which is how it enters the cache.
+        """
+        body = self._get(
+            "/account/leverage", connection_id=int(connection_id), instrument=instrument
+        )
+        return Leverage.from_dict(body)
+
+    def set_leverage(
+        self,
+        connection_id: int,
+        instrument: str,
+        *,
+        leverage: int | None = None,
+        mode: str | None = None,
+    ) -> Accepted:
+        """``POST /v1/account/leverage`` (``trading:write``): set the leverage as the window does.
+
+        Exactly one of ``leverage`` (an integer of at least 1) or ``mode``
+        (``max`` or ``smart``). The answer is ``Accepted`` with ``key``
+        ``None``; the applied value shows in :meth:`leverage` after the
+        exchange answered.
+        """
+        if (leverage is None) == (mode is None):
+            raise ValueError("exactly one of leverage and mode is required")
+        body: dict[str, Any] = {"connection_id": int(connection_id), "instrument": instrument}
+        if leverage is not None:
+            if isinstance(leverage, bool) or int(leverage) < 1:
+                raise ValueError("leverage must be an integer of at least 1")
+            body["leverage"] = int(leverage)
+        if mode is not None:
+            body["mode"] = mode
+        return Accepted.from_dict(self._send("POST", "/account/leverage", body))
+
+    def set_margin_mode(self, connection_id: int, instrument: str, margin_mode: str) -> Accepted:
+        """``POST /v1/account/margin-mode`` (``trading:write``): ``cross`` or ``isolated``.
+
+        Changing it with an open position is refused by the exchange, as in
+        the window; the ``Accepted`` answer does not know that yet.
+        """
+        body = {
+            "connection_id": int(connection_id),
+            "instrument": instrument,
+            "margin_mode": margin_mode,
+        }
+        return Accepted.from_dict(self._send("POST", "/account/margin-mode", body))
 
     def stream(self) -> Stream:
         """A :class:`~spectre_terminal.stream.Stream` for ``/v1/stream``, for ``async with``."""

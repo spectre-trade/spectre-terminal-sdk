@@ -24,12 +24,30 @@ EXPECTED_TOOLS = {
     "account_overview",
     "open_orders",
     "recent_fills",
+    "leverage",
     "place_order",
     "cancel_order",
     "cancel_all_orders",
     "close_position",
+    "place_trigger",
+    "cancel_trigger",
+    "cancel_all_triggers",
+    "amend_trigger",
+    "set_leverage",
+    "set_margin_mode",
 }
-TRADING_TOOLS = {"place_order", "cancel_order", "cancel_all_orders", "close_position"}
+TRADING_TOOLS = {
+    "place_order",
+    "cancel_order",
+    "cancel_all_orders",
+    "close_position",
+    "place_trigger",
+    "cancel_trigger",
+    "cancel_all_triggers",
+    "amend_trigger",
+    "set_leverage",
+    "set_margin_mode",
+}
 
 
 async def test_tools_are_registered_read_only(provider: TerminalProvider) -> None:
@@ -46,7 +64,9 @@ async def test_tools_are_registered_read_only(provider: TerminalProvider) -> Non
         else:
             assert tool.annotations.read_only_hint is True, tool.name
     place = next(t for t in listed if t.name == "place_order").input_schema
-    assert "client_key" in place["required"], "ключ идемпотентности обязателен"
+    assert "client_key" in place["required"], "the idempotency key is required"
+    trigger = next(t for t in listed if t.name == "place_trigger").input_schema
+    assert "client_key" in trigger["required"]
     schema = next(t for t in listed if t.name == "order_book_top").input_schema
     assert schema["required"] == ["instrument"]
     assert schema["properties"]["depth"]["maximum"] == 50
@@ -294,3 +314,134 @@ async def test_trading_tools_send_the_commands_and_answer_accepted(
             "close_position", {"connection_id": 13, "instrument": "binance:futures:BTCUSDT"}
         )
     assert "not_tradable" in _error_text(raised.value)
+
+
+async def test_trigger_tools_send_the_commands(
+    provider: TerminalProvider, fake_api: FakeApi
+) -> None:
+    server = build_server(provider)
+    placed = _structured(
+        await server.call_tool(
+            "place_trigger",
+            {
+                "connection_id": 12,
+                "instrument": "binance:futures:BTCUSDT",
+                "kind": "stop",
+                "side": "sell",
+                "notional": "800",
+                "trigger_price": "66000",
+                "client_key": "stop-1",
+            },
+        )
+    )
+    assert placed["key"] == "sl_1730294400123"
+    method, path, body = fake_api.bodies[-1]
+    assert (method, path) == ("POST", "/v1/orders/trigger")
+    assert body["kind"] == "stop" and body["side"] == "sell" and body["notional"] == "800"
+    assert body["trigger_price"] == "66000" and "rule" not in body
+
+    moved = _structured(
+        await server.call_tool(
+            "amend_trigger",
+            {
+                "connection_id": 12,
+                "instrument": "binance:futures:BTCUSDT",
+                "trigger_id": "42",
+                "kind": "stop_loss",
+                "trigger_price": "65500",
+            },
+        )
+    )
+    assert moved["key"] is None
+    method, path, body = fake_api.bodies[-1]
+    assert (method, path) == ("PATCH", "/v1/orders/trigger/42")
+    assert body == {
+        "connection_id": 12,
+        "instrument": "binance:futures:BTCUSDT",
+        "kind": "stop_loss",
+        "trigger_price": "65500",
+    }
+
+    _structured(
+        await server.call_tool(
+            "cancel_trigger",
+            {"connection_id": 12, "instrument": "binance:futures:BTCUSDT", "trigger_id": "42"},
+        )
+    )
+    method, path, _body = fake_api.bodies[-1]
+    assert method == "DELETE" and path.startswith("/v1/orders/trigger/42?")
+
+    _structured(
+        await server.call_tool(
+            "cancel_all_triggers", {"connection_id": 12, "instrument": "binance:futures:BTCUSDT"}
+        )
+    )
+    assert fake_api.bodies[-1][1] == "/v1/orders/trigger/cancel-all"
+
+    with pytest.raises(ToolError) as raised:
+        await server.call_tool(
+            "place_trigger",
+            {
+                "connection_id": 12,
+                "instrument": "binance:futures:BTCUSDT",
+                "kind": "stop",
+                "trigger_price": "1",
+                "client_key": "stop-2",
+            },
+        )
+    assert "side and notional" in _error_text(raised.value)
+
+
+async def test_leverage_tools(provider: TerminalProvider, fake_api: FakeApi) -> None:
+    server = build_server(provider)
+    read = _structured(
+        await server.call_tool(
+            "leverage", {"connection_id": 12, "instrument": "binance:futures:BTCUSDT"}
+        )
+    )
+    assert read == {
+        "connection_id": 12,
+        "instrument": "binance:futures:BTCUSDT",
+        "leverage": 10,
+        "max_leverage": 125,
+        "mode": "manual",
+        "margin_mode": "cross",
+    }
+    path, query, _headers = fake_api.requests[-1]
+    assert path == "/v1/account/leverage" and query["instrument"] == ["binance:futures:BTCUSDT"]
+
+    _structured(
+        await server.call_tool(
+            "set_leverage",
+            {"connection_id": 12, "instrument": "binance:futures:BTCUSDT", "leverage": 20},
+        )
+    )
+    method, path, body = fake_api.bodies[-1]
+    assert (method, path) == ("POST", "/v1/account/leverage") and body["leverage"] == 20
+    assert "mode" not in body
+
+    _structured(
+        await server.call_tool(
+            "set_margin_mode",
+            {
+                "connection_id": 12,
+                "instrument": "binance:futures:BTCUSDT",
+                "margin_mode": "isolated",
+            },
+        )
+    )
+    method, path, body = fake_api.bodies[-1]
+    assert (method, path) == ("POST", "/v1/account/margin-mode")
+    assert body["margin_mode"] == "isolated"
+
+    with pytest.raises(ToolError) as raised:
+        await server.call_tool(
+            "set_leverage",
+            {
+                "connection_id": 12,
+                "instrument": "binance:futures:BTCUSDT",
+                "leverage": 5,
+                "mode": "max",
+            },
+        )
+    assert "exactly one" in _error_text(raised.value)

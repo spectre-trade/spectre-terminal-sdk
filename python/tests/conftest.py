@@ -60,7 +60,11 @@ SECOND_PAGE_CURSOR = "page2"
 CONNECTION_ID = 12
 """The one connection the fixtures know."""
 
+WRITE_PATHS = ("/v1/positions/close", "/v1/account/leverage", "/v1/account/margin-mode")
+"""Writes outside ``/v1/orders``; ``/v1/account/leverage`` is a read on ``GET``."""
+
 ACCOUNT_ROUTES = {
+    "/v1/account/leverage": "leverage",
     "/v1/account/orders": "account_orders",
     "/v1/account/positions": "account_positions",
     "/v1/account/balances": "account_balances",
@@ -97,6 +101,9 @@ class FakeTerminal:
                 fake._handle(self)
 
             def do_DELETE(self) -> None:  # noqa: N802 - http.server naming
+                fake._handle(self)
+
+            def do_PATCH(self) -> None:  # noqa: N802 - http.server naming
                 fake._handle(self)
 
         self.server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
@@ -164,9 +171,9 @@ class FakeTerminal:
         if override is not None:
             body = override.raw if override.raw is not None else override.body
             return override.status, body, override.headers
-        if path.startswith("/v1/account/"):
+        if path.startswith("/v1/account/") and method == "GET":
             return self._account(path, query)
-        if path.startswith("/v1/orders") or path == "/v1/positions/close":
+        if path.startswith("/v1/orders") or path in WRITE_PATHS:
             return self._trading(method, path, query, body_in)
         if path == "/v1/instruments":
             cursor = query.get("cursor", [None])[0]
@@ -207,21 +214,30 @@ class FakeTerminal:
     def _trading(
         method: str, path: str, query: dict[str, list[str]], body_in: Any
     ) -> tuple[int, Any, dict[str, str]]:
-        """``POST /v1/orders``, ``DELETE /v1/orders/{id}``, cancel-all and close: ``accepted``."""
+        """Every write of the contract answers ``accepted``; only placements carry a ``key``."""
         accepted = load_fixture("accepted")
-        if method == "POST" and path == "/v1/orders":
-            if not isinstance(body_in, dict) or body_in.get("connection_id") != CONNECTION_ID:
-                return 404, error_body("not_found", "no such connection"), {}
-            return 200, {**accepted, "instrument": body_in.get("instrument")}, {}
         if method == "DELETE" and path.startswith("/v1/orders/"):
             if query.get("connection_id") != [str(CONNECTION_ID)]:
                 return 404, error_body("not_found", "no such connection"), {}
             instrument = query.get("instrument", [accepted["instrument"]])[0]
             return 200, {**accepted, "key": None, "instrument": instrument}, {}
-        if method == "POST" and path in ("/v1/orders/cancel-all", "/v1/positions/close"):
-            if not isinstance(body_in, dict) or body_in.get("connection_id") != CONNECTION_ID:
-                return 404, error_body("not_found", "no such connection"), {}
-            return 200, {**accepted, "key": None, "instrument": body_in.get("instrument")}, {}
+        if not isinstance(body_in, dict) or body_in.get("connection_id") != CONNECTION_ID:
+            return 404, error_body("not_found", "no such connection"), {}
+        instrument = body_in.get("instrument")
+        if method == "POST" and path == "/v1/orders":
+            return 200, {**accepted, "instrument": instrument}, {}
+        if method == "POST" and path == "/v1/orders/trigger":
+            return 200, {**accepted, "key": "sl_1730294400123", "instrument": instrument}, {}
+        if method == "PATCH" and path.startswith("/v1/orders/trigger/"):
+            return 200, {**accepted, "key": None, "instrument": instrument}, {}
+        if method == "POST" and path in (
+            "/v1/orders/cancel-all",
+            "/v1/orders/trigger/cancel-all",
+            "/v1/positions/close",
+            "/v1/account/leverage",
+            "/v1/account/margin-mode",
+        ):
+            return 200, {**accepted, "key": None, "instrument": instrument}, {}
         return 404, load_fixture("error"), {}
 
 

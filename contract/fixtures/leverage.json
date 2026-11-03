@@ -1,0 +1,8 @@
+{
+  "connection_id": 12,
+  "instrument": "binance:futures:BTCUSDT",
+  "leverage": 10,
+  "max_leverage": 125,
+  "mode": "manual",
+  "margin_mode": "cross"
+}

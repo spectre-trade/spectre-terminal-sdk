@@ -83,8 +83,65 @@ atomic command; without an open position it is `400 invalid_request`.
 | `rate_limited` (429) | more than 10 commands per second on this listener |
 | `unavailable` (503) | the terminal's command queue was full; the command was **not** sent, retry |
 
+## Trigger orders
+
+A stop loss or take profit is placed **on the open position**: the terminal
+takes side, size and rule from it, exactly as the window does, and refuses
+with `invalid_request` without one. A `stop` is your own order: it needs
+`side` and `notional` (the quote amount) and takes an optional `rule`
+(`price_above_or_equal` or `price_below_or_equal`; absent means above the
+market for a buy, below for a sell).
+
+```python
+sl = terminal.place_trigger(12, "binance:futures:BTCUSDT", kind="stop_loss", trigger_price="59000", client_key="sl-1")
+stop = terminal.place_trigger(12, "binance:futures:BTCUSDT", kind="stop", side="sell", notional="800", trigger_price="59000")
+
+trigger = next(t for t in terminal.account_orders(12).triggers if t.client_id == sl.key)
+terminal.amend_trigger(12, "binance:futures:BTCUSDT", trigger.id, kind="stop_loss", trigger_price="58500")
+terminal.cancel_trigger(12, "binance:futures:BTCUSDT", trigger.id)
+terminal.cancel_all_triggers(12, "binance:futures:BTCUSDT")   # plain orders stay
+```
+
+```ts
+const sl = await terminal.placeTrigger({ connectionId: 12, instrument, kind: "stop_loss", triggerPrice: "59000", clientKey: "sl-1" });
+const trigger = (await terminal.accountOrders(12)).triggers.find((t) => t.client_id === sl.key)!;
+await terminal.amendTrigger({ connectionId: 12, instrument, triggerId: trigger.id, kind: "stop_loss", triggerPrice: "58500" });
+await terminal.cancelTrigger({ connectionId: 12, instrument, triggerId: trigger.id });
+```
+
+`accepted.key` is the trigger's key (`sl_…`, `tp_…`, `stop_…`); it shows up
+as `client_id` of the trigger in `account.orders`. Cancelling and amending
+use the **numeric `id`** from there, not the key. Amending is the window's
+sequential replacement: the old trigger is cancelled, a new one placed, and
+`kind` has to be given again (a `stop` also its `side`). A venue for which
+the terminal keeps no trigger orders answers `unsupported` (501).
+
+## Leverage and margin mode
+
+Futures only. Reading needs `account:read`, changing `trading:write`.
+
+```python
+print(terminal.leverage(12, "binance:futures:BTCUSDT"))      # Leverage(leverage=10, max_leverage=125, mode="manual", margin_mode="cross", …)
+terminal.set_leverage(12, "binance:futures:BTCUSDT", leverage=20)
+terminal.set_leverage(12, "binance:futures:BTCUSDT", mode="max")   # or "smart"
+terminal.set_margin_mode(12, "binance:futures:BTCUSDT", "isolated")
+```
+
+```ts
+await terminal.leverage({ connectionId: 12, instrument });
+await terminal.setLeverage({ connectionId: 12, instrument, leverage: 20 });
+await terminal.setMarginMode({ connectionId: 12, instrument, marginMode: "isolated" });
+```
+
+The read comes from the terminal's cache, which the window's instrument
+selection and a leverage change fill: an instrument the terminal has not
+touched yet answers `not_active` (409). Setting the leverage is the way it
+enters the cache. `mode` in the answer is the terminal's leverage mode
+(`manual`, `max`, `smart`), not the exchange's. Changing the margin mode
+with an open position is refused by the exchange, as in the window; the
+`accepted` answer does not know that yet.
+
 ## What is not there yet
 
-Trigger orders (stop loss, take profit), leverage and margin mode, moving
-an order grid, and trading on MOEX. The MCP server exposes the same four
-operations as tools; see [mcp.md](mcp.md).
+Moving an order grid by dragging, and trading on MOEX. The MCP server
+exposes the same operations as tools; see [mcp.md](mcp.md).

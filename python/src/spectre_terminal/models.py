@@ -909,6 +909,36 @@ class Accepted:
         )
 
 
+@dataclass(frozen=True)
+class Leverage:
+    """``GET /v1/account/leverage``: leverage and margin mode of one futures instrument.
+
+    Read from the terminal's cache, which the window's instrument selection
+    and :meth:`~spectre_terminal.Terminal.set_leverage` fill; an instrument
+    the terminal has not touched yet is ``ApiError`` ``not_active``. ``mode``
+    is the terminal's leverage mode (``manual``, ``max``, ``smart``), not the
+    exchange's; ``margin_mode`` is ``cross`` or ``isolated``.
+    """
+
+    connection_id: int
+    instrument: str
+    leverage: int
+    max_leverage: int
+    mode: str
+    margin_mode: str
+
+    @classmethod
+    def from_dict(cls, d: Mapping[str, Any]) -> Leverage:
+        return cls(
+            connection_id=int(d["connection_id"]),
+            instrument=str(d["instrument"]),
+            leverage=int(d["leverage"]),
+            max_leverage=int(d["max_leverage"]),
+            mode=str(d["mode"]),
+            margin_mode=str(d["margin_mode"]),
+        )
+
+
 # --- account stream payloads ----------------------------------------------------
 
 

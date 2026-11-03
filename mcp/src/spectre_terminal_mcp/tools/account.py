@@ -1,4 +1,4 @@
-"""Account tools: overview, open orders, recent fills — one connection each."""
+"""Account tools: overview, open orders, recent fills, leverage — one connection each."""
 
 from __future__ import annotations
 
@@ -35,6 +35,30 @@ def register(server: MCPServer, provider: TerminalProvider) -> None:
             positions = terminal.account_positions(connection_id)
             orders = terminal.account_orders(connection_id)
         return account_overview(balances, positions, orders)
+
+    @server.tool(name="leverage", annotations=READ_ONLY)
+    def leverage(
+        connection_id: Annotated[int, _CONNECTION],
+        instrument: Annotated[
+            str, Field(description="Futures instrument address exchange:market:symbol")
+        ],
+    ) -> dict[str, Any]:
+        """Leverage, its maximum, the terminal's leverage mode and the margin mode of an instrument.
+
+        Read from the terminal's cache: an instrument the terminal has not
+        touched yet answers ``not_active`` — open it in the terminal or set
+        the leverage with ``set_leverage``.
+        """
+        with provider.call() as terminal:
+            info = terminal.leverage(connection_id, instrument)
+        return {
+            "connection_id": info.connection_id,
+            "instrument": info.instrument,
+            "leverage": info.leverage,
+            "max_leverage": info.max_leverage,
+            "mode": info.mode,
+            "margin_mode": info.margin_mode,
+        }
 
     @server.tool(name="open_orders", annotations=READ_ONLY)
     def open_orders(

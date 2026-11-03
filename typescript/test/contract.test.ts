@@ -363,6 +363,15 @@ const accepted = {
   instrument: "string",
 } as const;
 
+const leverage = {
+  connection_id: "int",
+  instrument: "string",
+  leverage: "int",
+  max_leverage: "int",
+  mode: "string",
+  margin_mode: "string",
+} as const;
+
 const errorEnvelope = { error: { code: "string", message: "string" } } as const;
 
 /** Fixture file → the shape it must match. One entry per operation. */
@@ -383,6 +392,7 @@ const SHAPES: Record<string, Spec> = {
   "account_balances.json": accountBalances,
   "account_fills.json": accountFills,
   "accepted.json": accepted,
+  "leverage.json": leverage,
   "error.json": errorEnvelope,
 };
 

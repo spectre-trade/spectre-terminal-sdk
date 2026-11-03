@@ -59,6 +59,7 @@ clients can call them without asking the user each time.
 | `account_overview` | `connection_id` | balances, open positions with PnL, and the count of open orders and triggers per instrument |
 | `open_orders` | `connection_id`, optional `instrument` | open orders and trigger orders, the terminal's `key` and the exchange id for each |
 | `recent_fills` | `connection_id`, `limit` (20, ≤ 200), optional `since_ts` | the latest fills, newest last, with a buy/sell volume total |
+| `leverage` | `connection_id`, `instrument` | leverage, its maximum, the terminal's mode (`manual`, `max`, `smart`) and the margin mode of a futures instrument; `not_active` until the terminal touched the instrument |
 
 Trading tools, **not** read-only (annotated `destructive_hint`, so an MCP
 client may ask the user before each call):
@@ -69,6 +70,12 @@ client may ask the user before each call):
 | `cancel_order` | `connection_id`, `instrument`, `order_id` | cancels one order by terminal key or exchange id |
 | `cancel_all_orders` | `connection_id`, `instrument` | cancels every order of the instrument |
 | `close_position` | `connection_id`, `instrument` | closes the instrument's position the way the window does |
+| `place_trigger` | `connection_id`, `instrument`, `kind`, `trigger_price`, `client_key`; for `stop`: `side`, `notional`, optional `rule` | a stop loss or take profit on the open position, or a stop; answers with the trigger's key |
+| `cancel_trigger` | `connection_id`, `instrument`, `trigger_id` | cancels one trigger by the numeric id from `open_orders` |
+| `amend_trigger` | `connection_id`, `instrument`, `trigger_id`, `kind`, `trigger_price`; for `stop`: `side`, optional `rule` | moves a trigger to a new price (cancel, then place) |
+| `cancel_all_triggers` | `connection_id`, `instrument` | cancels every trigger of the instrument; plain orders stay |
+| `set_leverage` | `connection_id`, `instrument`, `leverage` or `mode` (`max`, `smart`) | sets the leverage the way the window does |
+| `set_margin_mode` | `connection_id`, `instrument`, `margin_mode` (`cross`, `isolated`) | sets the margin mode; refused by the exchange while a position is open |
 
 Every trading answer is `accepted`, not filled: the exchange's outcome shows
 up in `open_orders` and `recent_fills`. The model is told so in the tool
@@ -106,11 +113,10 @@ The token never appears in any message.
 
 ## What it does not do
 
-- No settings and no windows. Of trading, only plain orders, cancellation
-  and closing a position — trigger orders and leverage come with later
-  terminal stages. There is no confirmation inside the server: the Local API
-  toggle in the terminal is the consent and the kill switch (product
-  decision); MCP clients that confirm destructive tools do so on their own.
+- No settings and no windows. Of trading, no grid moves and no MOEX. There
+  is no confirmation inside the server: the Local API toggle in the terminal
+  is the consent and the kill switch (product decision); MCP clients that
+  confirm destructive tools do so on their own.
 - No streaming: MCP tools are request and response. An agent that needs live
   data polls `market_snapshot`; a program that needs live data uses the SDK
   stream.

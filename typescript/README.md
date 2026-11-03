@@ -59,7 +59,9 @@ Every operation of the contract has a method: `meta`, `health`,
 `connections`, `connection`, `instruments` / `iterInstruments`, `intervals`,
 `candles`, `trades`, `snapshot`, `orderbook`, `clusters`, `accountOrders`,
 `accountPositions`, `accountBalances`, `accountFills`, `placeOrder`,
-`cancelOrder`, `cancelAll`, `closePosition`, `stream`. Option names are
+`cancelOrder`, `cancelAll`, `closePosition`, `placeTrigger`, `cancelTrigger`,
+`cancelAllTriggers`, `amendTrigger`, `leverage`, `setLeverage`,
+`setMarginMode`, `stream`. Option names are
 camelCase; response fields keep the wire names from the contract.
 
 ## Account
@@ -124,6 +126,22 @@ refused size or price is `invalid_request` (400); more than
 `meta.limits.commands_per_second` commands is `rate_limited` (429).
 [`examples/place-and-cancel.ts`](examples/place-and-cancel.ts) places a resting
 limit order far from the market and cancels it.
+
+Trigger orders and leverage go the same way. A `stop_loss` or `take_profit`
+is placed on the open position (its side and size come from the position);
+a `stop` carries its own `side` and quote `notional`. Triggers are cancelled
+and moved by the numeric `id` from `accountOrders().triggers`.
+
+```ts
+const sl = await terminal.placeTrigger({ connectionId: 12, instrument, kind: "stop_loss", triggerPrice: "59000" });
+const trigger = (await terminal.accountOrders(12)).triggers.find((t) => t.client_id === sl.key)!;
+await terminal.amendTrigger({ connectionId: 12, instrument, triggerId: trigger.id, kind: "stop_loss", triggerPrice: "58500" });
+await terminal.cancelTrigger({ connectionId: 12, instrument, triggerId: trigger.id });
+
+console.log(await terminal.leverage({ connectionId: 12, instrument })); // not_active until the terminal touched it
+await terminal.setLeverage({ connectionId: 12, instrument, leverage: 20 });
+await terminal.setMarginMode({ connectionId: 12, instrument, marginMode: "isolated" });
+```
 
 ## Money and time
 

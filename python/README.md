@@ -60,7 +60,9 @@ Every operation of the contract is a method of `Terminal`: `meta`, `health`,
 `connections`, `connection`, `instruments` / `iter_instruments`,
 `intervals`, `candles`, `trades`, `snapshot`, `orderbook`, `clusters`,
 `account_orders`, `account_positions`, `account_balances`, `account_fills`,
-`place_order`, `cancel_order`, `cancel_all`, `close_position`, `stream`.
+`place_order`, `cancel_order`, `cancel_all`, `close_position`, `place_trigger`,
+`cancel_trigger`, `cancel_all_triggers`, `amend_trigger`, `leverage`,
+`set_leverage`, `set_margin_mode`, `stream`.
 Errors derive from `SpectreTerminalError`; the terminal's own refusals are
 `ApiError` with the contract's `code` and the HTTP `status`.
 
@@ -138,6 +140,26 @@ is `ApiError` with code `not_tradable`; a venue minimum or step refusal is
 per second is `rate_limited`. `examples/place_and_cancel.py` places one
 limit far below the market, watches it appear on `account.orders` and
 cancels it — on a real account, so pick a test one.
+
+Trigger orders and leverage go the same way. A stop loss or take profit is
+placed on the open position (its side and size come from the position); a
+`stop` carries its own side and quote amount. Triggers are cancelled and
+moved by the numeric `id` from `account_orders().triggers`.
+
+```python
+sl = terminal.place_trigger(12, "binance:futures:BTCUSDT", kind="stop_loss", trigger_price="59000")
+trigger = next(t for t in terminal.account_orders(12).triggers if t.client_id == sl.key)
+terminal.amend_trigger(
+    12, "binance:futures:BTCUSDT", trigger.id, kind="stop_loss", trigger_price="58500"
+)
+terminal.cancel_trigger(12, "binance:futures:BTCUSDT", trigger.id)
+
+print(
+    terminal.leverage(12, "binance:futures:BTCUSDT")
+)  # not_active until the terminal touched the instrument
+terminal.set_leverage(12, "binance:futures:BTCUSDT", leverage=20)
+terminal.set_margin_mode(12, "binance:futures:BTCUSDT", "isolated")
+```
 
 ## Documentation
 

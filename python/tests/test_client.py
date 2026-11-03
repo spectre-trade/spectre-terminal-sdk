@@ -299,6 +299,136 @@ def test_cancel_all_and_close_position_post_json(fake_terminal: FakeTerminal) ->
     assert accepted.key is None
 
 
+def test_place_trigger_posts_json(fake_terminal: FakeTerminal) -> None:
+    terminal = client(fake_terminal)
+    accepted = terminal.place_trigger(
+        12, INSTRUMENT, kind="stop_loss", trigger_price=Decimal("66000"), client_key="sl-42"
+    )
+    request = fake_terminal.last
+    assert request.method == "POST" and request.path == "/v1/orders/trigger"
+    assert request.body == {
+        "connection_id": 12,
+        "instrument": INSTRUMENT,
+        "kind": "stop_loss",
+        "trigger_price": "66000",
+        "client_key": "sl-42",
+    }
+    assert accepted.key == "sl_1730294400123" and accepted.instrument == INSTRUMENT
+
+    terminal.place_trigger(
+        12,
+        INSTRUMENT,
+        kind="stop",
+        side="sell",
+        notional="800",
+        trigger_price="66000",
+        rule="price_below_or_equal",
+    )
+    assert fake_terminal.last.body == {
+        "connection_id": 12,
+        "instrument": INSTRUMENT,
+        "kind": "stop",
+        "trigger_price": "66000",
+        "side": "sell",
+        "notional": "800",
+        "rule": "price_below_or_equal",
+    }
+
+
+def test_place_trigger_checks_the_fields_of_its_kind(fake_terminal: FakeTerminal) -> None:
+    terminal = client(fake_terminal)
+    with pytest.raises(ValueError):
+        terminal.place_trigger(12, INSTRUMENT, kind="stop", trigger_price="1")
+    with pytest.raises(ValueError):
+        terminal.place_trigger(12, INSTRUMENT, kind="take_profit", trigger_price="1", side="buy")
+    with pytest.raises(ValueError):
+        terminal.amend_trigger(12, INSTRUMENT, 42, kind="stop", trigger_price="1")
+    with pytest.raises(TypeError):
+        terminal.place_trigger(12, INSTRUMENT, kind="stop_loss", trigger_price=1.5)
+    assert fake_terminal.requests == []
+
+
+def test_cancel_and_amend_trigger(fake_terminal: FakeTerminal) -> None:
+    terminal = client(fake_terminal)
+    accepted = terminal.cancel_trigger(12, INSTRUMENT, 42)
+    request = fake_terminal.last
+    assert request.method == "DELETE" and request.path == "/v1/orders/trigger/42"
+    assert request.query == {"connection_id": ["12"], "instrument": [INSTRUMENT]}
+    assert request.body is None and accepted.key is None
+
+    accepted = terminal.amend_trigger(12, INSTRUMENT, "42", kind="stop_loss", trigger_price="65500")
+    request = fake_terminal.last
+    assert request.method == "PATCH" and request.path == "/v1/orders/trigger/42"
+    assert request.headers["Content-Type"] == "application/json"
+    assert request.body == {
+        "connection_id": 12,
+        "instrument": INSTRUMENT,
+        "kind": "stop_loss",
+        "trigger_price": "65500",
+    }
+    assert accepted.key is None
+
+    terminal.amend_trigger(12, INSTRUMENT, 42, kind="stop", trigger_price="65500", side="sell")
+    assert fake_terminal.last.body["side"] == "sell" and "rule" not in fake_terminal.last.body
+
+    accepted = terminal.cancel_all_triggers(12, INSTRUMENT)
+    request = fake_terminal.last
+    assert request.method == "POST" and request.path == "/v1/orders/trigger/cancel-all"
+    assert request.body == {"connection_id": 12, "instrument": INSTRUMENT}
+    assert accepted.key is None
+
+
+def test_leverage_reads_and_writes(fake_terminal: FakeTerminal) -> None:
+    terminal = client(fake_terminal)
+    leverage = terminal.leverage(12, INSTRUMENT)
+    request = fake_terminal.last
+    assert request.method == "GET" and request.path == "/v1/account/leverage"
+    assert request.query == {"connection_id": ["12"], "instrument": [INSTRUMENT]}
+    assert (leverage.leverage, leverage.max_leverage) == (10, 125)
+    assert (leverage.mode, leverage.margin_mode) == ("manual", "cross")
+
+    accepted = terminal.set_leverage(12, INSTRUMENT, leverage=20)
+    request = fake_terminal.last
+    assert request.method == "POST" and request.path == "/v1/account/leverage"
+    assert request.body == {"connection_id": 12, "instrument": INSTRUMENT, "leverage": 20}
+    assert accepted.key is None
+
+    terminal.set_leverage(12, INSTRUMENT, mode="max")
+    assert fake_terminal.last.body == {"connection_id": 12, "instrument": INSTRUMENT, "mode": "max"}
+
+    accepted = terminal.set_margin_mode(12, INSTRUMENT, "isolated")
+    request = fake_terminal.last
+    assert request.method == "POST" and request.path == "/v1/account/margin-mode"
+    assert request.body == {
+        "connection_id": 12,
+        "instrument": INSTRUMENT,
+        "margin_mode": "isolated",
+    }
+    assert accepted.key is None
+
+
+def test_set_leverage_needs_exactly_one_of_value_and_mode(fake_terminal: FakeTerminal) -> None:
+    terminal = client(fake_terminal)
+    with pytest.raises(ValueError):
+        terminal.set_leverage(12, INSTRUMENT)
+    with pytest.raises(ValueError):
+        terminal.set_leverage(12, INSTRUMENT, leverage=5, mode="max")
+    with pytest.raises(ValueError):
+        terminal.set_leverage(12, INSTRUMENT, leverage=0)
+    assert fake_terminal.requests == []
+
+
+def test_leverage_not_active_keeps_its_code(fake_terminal: FakeTerminal) -> None:
+    fake_terminal.override(
+        "/v1/account/leverage",
+        409,
+        {"error": {"code": "not_active", "message": "leverage is not loaded yet"}},
+    )
+    with pytest.raises(ApiError) as error:
+        client(fake_terminal).leverage(12, INSTRUMENT)
+    assert (error.value.code, error.value.status) == ("not_active", 409)
+
+
 def test_not_tradable(fake_terminal: FakeTerminal) -> None:
     fake_terminal.override(
         "/v1/orders",
