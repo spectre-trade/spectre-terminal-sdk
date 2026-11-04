@@ -4,7 +4,7 @@ Three numbers move independently:
 
 | Number | Where | Meaning |
 | --- | --- | --- |
-| terminal version | `meta().app_version`, e.g. `1.9.6` | the Spectre Terminal release |
+| terminal version | `meta().app_version`, e.g. `2.0.0` | the Spectre Terminal release |
 | API version | `meta().api_version`, the `/v1` path | the contract; grows only additively within a version |
 | SDK version | the package version; one for all packages in this repository | SemVer against the contract |
 
