@@ -52,6 +52,14 @@ def is_account_topic(topic: str) -> bool:
 WORKSPACE_TOPIC = "workspace"
 """The layout topic: one per terminal, subscribed without instrument or connection."""
 
+SETTINGS_TOPIC = "settings"
+"""The settings topic: a frame per written row, subscribed like ``workspace``."""
+
+
+def is_terminal_topic(topic: str) -> bool:
+    """``True`` for the topics of the terminal itself (``workspace``, ``settings``)."""
+    return topic in (WORKSPACE_TOPIC, SETTINGS_TOPIC)
+
 
 CLOSE_RAISES = frozenset({1001, 1006, 4008, 4029})
 """Close codes that end iteration with :class:`~spectre_terminal.errors.StreamClosed`.
@@ -299,15 +307,16 @@ class Stream:
         general rule without it. Account topics (``account.orders``,
         ``account.positions``, ``account.balances``, ``account.fills``) need
         ``connection_id`` and take no instrument: the request carries none.
-        ``workspace`` takes neither: the layout is one per terminal, and the
-        first frame is the current snapshot. ``params`` matter only for
-        ``book.top`` (``depth`` 1-200, ``interval_ms`` >= 50); other topics
-        ignore them. The reply names the subscription id and the connection
-        (``None`` for ``workspace``); an ``error`` reply raises
+        ``workspace`` and ``settings`` take neither: they are one per
+        terminal; ``workspace`` sends the current snapshot first, ``settings``
+        a frame per written row. ``params`` matter only for ``book.top``
+        (``depth`` 1-200, ``interval_ms`` >= 50); other topics ignore them.
+        The reply names the subscription id and the connection (``None`` for
+        the terminal topics); an ``error`` reply raises
         :class:`~spectre_terminal.errors.StreamRequestError`.
         """
         account = is_account_topic(topic)
-        workspace = topic == WORKSPACE_TOPIC
+        workspace = is_terminal_topic(topic)
         if account and connection_id is None:
             raise ValueError(f"{topic} needs connection_id: account topics have no default")
         if not account and not workspace and instrument is None:

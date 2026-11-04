@@ -21,6 +21,7 @@ import {
   type SubscriptionError,
   type Topic,
   type TradesEvent,
+  type SettingsEvent,
   type WorkspaceEvent,
 } from "../src/index.ts";
 
@@ -91,6 +92,21 @@ function serve(socket: ServerSocket, request: Record<string, unknown>): void {
   const topic = String(request.topic);
   if (topic.startsWith("account.")) {
     serveAccount(socket, request, topic);
+    return;
+  }
+  if (topic === "settings") {
+    if ("instrument" in request || "connection_id" in request) {
+      send(socket, { type: "error", request_id: requestId, code: "invalid_request", message: "settings takes no instrument" });
+      return;
+    }
+    send(socket, { type: "subscribed", request_id: requestId, sub: "settings" });
+    send(socket, {
+      type: "event",
+      sub: "settings",
+      seq: 1,
+      ts: 1730294400150,
+      data: { scope: "global", scope_id: "default", connection_id: null, category: "multiview", key: "stack_width_px", value: 260 },
+    });
     return;
   }
   if (topic === "workspace") {
@@ -494,5 +510,26 @@ test("workspace subscribes without instrument or connection and gets the snapsho
   assert.equal(event.topic, "workspace");
   assert.equal(event.sub, "workspace");
   assert.equal(event.data.windows[0]?.tabs[0]?.name, "XRP");
+  await stream.close();
+});
+
+test("settings subscribes like workspace and types the written row", async () => {
+  const stream = await terminal().stream();
+  const subscribed = await stream.subscribe({ topic: "settings", connectionId: 12 });
+  assert.equal(subscribed.sub, "settings");
+  assert.equal(subscribed.topic, "settings");
+  assert.equal(subscribed.connection_id, undefined);
+  const request = received.at(-1)!;
+  assert.ok(!("instrument" in request) && !("connection_id" in request));
+  const frames: StreamFrame[] = [];
+  for await (const frame of stream) {
+    frames.push(frame);
+    break;
+  }
+  const event = frames[0] as SettingsEvent;
+  assert.equal(event.topic, "settings");
+  assert.equal(event.data.key, "stack_width_px");
+  assert.equal(event.data.value, 260);
+  assert.equal(event.data.writable, undefined);
   await stream.close();
 });

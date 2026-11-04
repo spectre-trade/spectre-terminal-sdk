@@ -33,10 +33,13 @@ from spectre_terminal.models import (
     Meta,
     Order,
     OrderBook,
+    OrderbookSettings,
     OrdersUpdate,
     Page,
     Position,
     PositionUpdate,
+    Settings,
+    SettingsApplied,
     Snapshot,
     Subscribed,
     SubscriptionError,
@@ -73,6 +76,9 @@ PARSERS: dict[str, Any] = {
     "workspace": Workspace.from_dict,
     "workspace_window": lambda d: Window.from_dict(d["data"]),
     "workspace_outcome": WorkspaceOutcome.from_dict,
+    "settings": Settings.from_dict,
+    "settings_orderbook": OrderbookSettings.from_dict,
+    "settings_applied": SettingsApplied.from_dict,
 }
 
 FIXTURE_NAMES = sorted(path.stem for path in FIXTURES.glob("*.json"))
@@ -119,6 +125,7 @@ def test_meta_types() -> None:
     assert meta.limits.exchange_subscriptions_per_second == 5
     assert meta.limits.commands_per_second == 10
     assert meta.limits.workspace_commands_per_second == 5
+    assert meta.limits.settings_commands_per_second == 5
     assert meta.scopes == [
         "market:read",
         "connections:read",

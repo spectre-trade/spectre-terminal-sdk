@@ -64,7 +64,8 @@ Every operation of the contract is a method of `Terminal`: `meta`, `health`,
 `cancel_trigger`, `cancel_all_triggers`, `amend_trigger`, `leverage`,
 `set_leverage`, `set_margin_mode`, `workspace`, `workspace_window`,
 `open_stack`, `open_multiview`, `set_stack_instrument`, `close_stack`,
-`close_tab`, `activate_tab`, `close_window`, `activate_window`, `stream`.
+`close_tab`, `activate_tab`, `close_window`, `activate_window`, `settings`,
+`orderbook_settings`, `update_settings`, `stream`.
 Errors derive from `SpectreTerminalError`; the terminal's own refusals are
 `ApiError` with the contract's `code` and the HTTP `status`.
 
@@ -173,6 +174,18 @@ the `workspace` stream topic sends the whole layout on every change.
 opened = terminal.open_stack("binance:futures:BTCUSDT", chart=True, activate=False)
 terminal.set_stack_instrument(opened.stacks[0], "binance:futures:ETHUSDT")
 terminal.close_tab(opened.window_id, opened.tab_id)
+```
+
+Settings are read as stored (`settings()`), resolved the way a stack sees
+them (`orderbook_settings()`), and written through the same path as the
+Settings App after the terminal's catalogue checked every change
+(`update_settings()`); the `settings` stream topic reports every written
+row.
+
+```python
+from spectre_terminal import SettingChange
+
+terminal.update_settings([SettingChange("multiview", "stack_width_px", 300)])
 ```
 
 ## Documentation

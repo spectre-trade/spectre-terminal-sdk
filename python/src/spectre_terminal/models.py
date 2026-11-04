@@ -62,6 +62,12 @@ __all__ = [
     "Window",
     "Workspace",
     "WorkspaceOutcome",
+    "OrderbookSetting",
+    "OrderbookSettings",
+    "SettingChange",
+    "SettingRow",
+    "Settings",
+    "SettingsApplied",
 ]
 
 T = TypeVar("T")
@@ -114,9 +120,10 @@ class Limits:
     """Ceilings of the stream and of trading, as printed by ``/v1/meta``.
 
     ``commands_per_second`` is the trading-command rate per listener,
-    ``workspace_commands_per_second`` the workspace-command rate; each is
-    ``0`` for a terminal older than the stage that added the limit, which
-    prints none because it accepts no such commands.
+    ``workspace_commands_per_second`` the workspace-command rate,
+    ``settings_commands_per_second`` the settings-write rate; each is ``0``
+    for a terminal older than the stage that added the limit, which prints
+    none because it accepts no such commands.
     """
 
     ws_connections_per_token: int
@@ -125,6 +132,7 @@ class Limits:
     exchange_subscriptions_per_second: int
     commands_per_second: int = 0
     workspace_commands_per_second: int = 0
+    settings_commands_per_second: int = 0
 
     @classmethod
     def from_dict(cls, d: Mapping[str, Any]) -> Limits:
@@ -135,6 +143,7 @@ class Limits:
             exchange_subscriptions_per_second=int(d["exchange_subscriptions_per_second"]),
             commands_per_second=int(d.get("commands_per_second") or 0),
             workspace_commands_per_second=int(d.get("workspace_commands_per_second") or 0),
+            settings_commands_per_second=int(d.get("settings_commands_per_second") or 0),
         )
 
 
@@ -1144,6 +1153,152 @@ class WorkspaceOutcome:
         )
 
 
+# --- settings --------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class SettingRow:
+    """One row of the terminal's settings table, as stored.
+
+    ``scope`` is ``global`` or ``order_book``; ``scope_id`` is ``default``,
+    an instrument address, or ``None`` for hotkeys; ``connection_id`` is the
+    owning connection or ``None``. ``value`` is the decoded JSON (numbers as
+    written). ``writable`` says whether :meth:`Terminal.update_settings`
+    accepts the key; it is ``None`` on a ``settings`` stream frame, which
+    carries no such flag.
+    """
+
+    scope: str
+    scope_id: str | None
+    connection_id: int | None
+    category: str
+    key: str
+    value: Any
+    writable: bool | None = None
+
+    @classmethod
+    def from_dict(cls, d: Mapping[str, Any]) -> SettingRow:
+        writable = d.get("writable")
+        return cls(
+            scope=str(d["scope"]),
+            scope_id=_optional_str(d.get("scope_id")),
+            connection_id=_optional_int(d.get("connection_id")),
+            category=str(d["category"]),
+            key=str(d["key"]),
+            value=d.get("value"),
+            writable=None if writable is None else bool(writable),
+        )
+
+
+@dataclass(frozen=True)
+class Settings:
+    """``GET /v1/settings``: rows as stored, without the default ladder."""
+
+    data: list[SettingRow]
+
+    def get(self, category: str, key: str) -> SettingRow | None:
+        return next((row for row in self.data if row.category == category and row.key == key), None)
+
+    @classmethod
+    def from_dict(cls, d: Mapping[str, Any]) -> Settings:
+        return cls(data=[SettingRow.from_dict(item) for item in d.get("data") or ()])
+
+
+@dataclass(frozen=True)
+class OrderbookSetting:
+    """One stack setting with the level it was resolved from.
+
+    ``resolved_from`` is ``instrument`` (the pair's row on the connection),
+    ``connection`` (the connection's default), ``app_instrument`` (the pair's
+    row without a connection) or ``global``.
+    """
+
+    value: Any
+    resolved_from: str
+    writable: bool
+
+    @classmethod
+    def from_dict(cls, d: Mapping[str, Any]) -> OrderbookSetting:
+        return cls(
+            value=d.get("value"),
+            resolved_from=str(d["resolved_from"]),
+            writable=bool(d["writable"]),
+        )
+
+
+@dataclass(frozen=True)
+class OrderbookSettings:
+    """``GET /v1/settings/orderbook``: one instrument's stack settings as its stack sees them."""
+
+    connection_id: int
+    instrument: str
+    data: dict[str, dict[str, OrderbookSetting]]
+
+    def get(self, category: str, key: str) -> OrderbookSetting | None:
+        return self.data.get(category, {}).get(key)
+
+    @classmethod
+    def from_dict(cls, d: Mapping[str, Any]) -> OrderbookSettings:
+        # ``data`` is a map of maps: a category or a key is an object with
+        # ``resolved_from``; anything else at those levels is a field a newer
+        # terminal added and is ignored.
+        data: dict[str, dict[str, OrderbookSetting]] = {}
+        for category, keys in (d.get("data") or {}).items():
+            if not isinstance(keys, Mapping):
+                continue
+            parsed = {
+                str(key): OrderbookSetting.from_dict(item)
+                for key, item in keys.items()
+                if isinstance(item, Mapping) and "resolved_from" in item
+            }
+            if parsed:
+                data[str(category)] = parsed
+        return cls(
+            connection_id=int(d["connection_id"]),
+            instrument=str(d["instrument"]),
+            data=data,
+        )
+
+
+@dataclass(frozen=True)
+class SettingChange:
+    """One change for :meth:`Terminal.update_settings`.
+
+    ``instrument`` addresses the pair's row (scope ``order_book``);
+    ``connection_id`` with ``scope="order_book"`` and no instrument addresses
+    the connection's default; neither addresses the global default. Global
+    settings take no connection.
+    """
+
+    category: str
+    key: str
+    value: Any
+    scope: str | None = None
+    instrument: str | None = None
+    connection_id: int | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        body: dict[str, Any] = {"category": self.category, "key": self.key, "value": self.value}
+        if self.scope is not None:
+            body["scope"] = self.scope
+        if self.instrument is not None:
+            body["instrument"] = self.instrument
+        if self.connection_id is not None:
+            body["connection_id"] = int(self.connection_id)
+        return body
+
+
+@dataclass(frozen=True)
+class SettingsApplied:
+    """``PATCH /v1/settings``: how many changes were applied (all of them, or the call raised)."""
+
+    applied: int
+
+    @classmethod
+    def from_dict(cls, d: Mapping[str, Any]) -> SettingsApplied:
+        return cls(applied=int(d["applied"]))
+
+
 # --- account stream payloads ----------------------------------------------------
 
 
@@ -1188,8 +1343,8 @@ def topic_of(sub: str) -> str:
 
     Market subscriptions are ``"{stream}:{topic}"``, account ones
     ``"{connection}:account.<topic>"``: ``"12:account.fills"`` -> ``"account.fills"``.
-    The ``workspace`` subscription has no stream or connection: its id is the
-    topic itself.
+    The ``workspace`` and ``settings`` subscriptions have no stream or
+    connection: their id is the topic itself.
     """
     head, sep, topic = sub.partition(":")
     return topic if sep else head
@@ -1199,7 +1354,7 @@ def topic_of(sub: str) -> str:
 class Subscribed:
     """Reply to ``subscribe``: the subscription id and the connection chosen for it.
 
-    ``connection_id`` is ``None`` for ``workspace``: the layout has no connection.
+    ``connection_id`` is ``None`` for ``workspace`` and ``settings``: neither has a connection.
     """
 
     sub: str
@@ -1240,9 +1395,9 @@ def parse_event_data(topic: str, data: Any) -> Any:
     ``clusters`` -> :class:`Cluster`, ``account.orders`` ->
     :class:`OrdersUpdate`, ``account.positions`` -> :class:`PositionUpdate`,
     ``account.balances`` -> :class:`Balance`, ``account.fills`` ->
-    :class:`Fill`, ``workspace`` -> :class:`Workspace`. A topic this client
-    does not know is passed through as decoded JSON, so a newer terminal
-    still streams.
+    :class:`Fill`, ``workspace`` -> :class:`Workspace`, ``settings`` ->
+    :class:`SettingRow`. A topic this client does not know is passed through
+    as decoded JSON, so a newer terminal still streams.
     """
     if topic == "trades":
         return [Trade.from_dict(item) for item in data or ()]
@@ -1264,6 +1419,8 @@ def parse_event_data(topic: str, data: Any) -> Any:
         return Fill.from_dict(data)
     if topic == "workspace":
         return Workspace.from_dict(data)
+    if topic == "settings":
+        return SettingRow.from_dict(data)
     return data
 
 

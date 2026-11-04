@@ -1,0 +1,6 @@
+{
+  "data": [
+    { "scope": "global", "scope_id": "default", "connection_id": null,
+      "category": "multiview", "key": "stack_width_px", "value": 250, "writable": true }
+  ]
+}

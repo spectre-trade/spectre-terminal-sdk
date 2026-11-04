@@ -45,15 +45,17 @@ The id is shared by every client subscribed to the same pair and topic;
 | `account.balances` | — | one currency's balance | conflated |
 | `account.fills` | — | one fill | a frame per fill, dropped when the queue is full; `seq` shows the gap |
 | `workspace` | — | the whole layout, as `data` in `/workspace` | the current snapshot right on subscribe, then a frame per change; conflated |
+| `settings` | — | one written row, as an element of `data` in `/settings` without `writable` | a frame per row written to the settings table, from any writer; no snapshot on subscribe |
 
 Account topics are keyed by **connection**, not instrument: subscribe with
 `connection_id` and no `instrument` (scope `account:read`). They do not touch
 the exchange and send no snapshot; read the state with `/v1/account/*` first.
 See [account.md](account.md).
 
-The `workspace` topic takes neither instrument nor connection (scope
-`workspace:read`); its `sub` is `"workspace"` and the `subscribed` reply has
-no `connection_id`. See [workspace.md](workspace.md).
+The `workspace` and `settings` topics take neither instrument nor connection
+(scopes `workspace:read` and `settings:read`); their `sub` is the topic name
+and the `subscribed` reply has no `connection_id`. See
+[workspace.md](workspace.md) and [settings.md](settings.md).
 
 `book.top` parameters are per subscriber: two clients can watch the same book
 at different depths and rates. Out-of-range values are refused with

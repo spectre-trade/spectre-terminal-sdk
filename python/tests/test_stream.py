@@ -21,6 +21,7 @@ from spectre_terminal import (
     Gap,
     Order,
     OrdersUpdate,
+    SettingRow,
     Stream,
     StreamClosed,
     StreamRequestError,
@@ -74,7 +75,7 @@ class ScriptedServer:
         rid = request.get("request_id")
         if request["type"] == "unsubscribe":
             sub = request["sub"]
-            if sub == "7:trades" or sub == "workspace" or sub.startswith("12:account."):
+            if sub in ("7:trades", "workspace", "settings") or sub.startswith("12:account."):
                 return [{"type": "unsubscribed", "request_id": rid, "sub": sub}]
             return [
                 {
@@ -84,6 +85,22 @@ class ScriptedServer:
                     "code": "not_found",
                     "message": "no such subscription on this connection",
                 }
+            ]
+        if request["topic"] == "settings":
+            if "instrument" in request or "connection_id" in request:
+                return [
+                    {
+                        "type": "error",
+                        "request_id": rid,
+                        "code": "invalid_request",
+                        "message": "settings takes neither instrument nor connection_id",
+                    }
+                ]
+            row = dict(load_fixture("settings")["data"][0])
+            row.pop("writable")
+            return [
+                {"type": "subscribed", "request_id": rid, "sub": "settings"},
+                {"type": "event", "sub": "settings", "seq": 1, "ts": 1, "data": row},
             ]
         if request["topic"] == "workspace":
             if "instrument" in request or "connection_id" in request:
@@ -483,6 +500,22 @@ def test_subscribe_workspace_takes_no_instrument_and_gets_the_snapshot_first() -
             assert done.sub == "workspace"
         request = server.requests[0]
         assert request["topic"] == "workspace"
+        assert "instrument" not in request and "connection_id" not in request
+
+    run(test)
+
+
+def test_subscribe_settings_takes_no_instrument_and_types_the_row() -> None:
+    async def test(server: ScriptedServer, port: int) -> None:
+        async with stream_for(port) as stream:
+            subscribed = await stream.subscribe("settings")
+            assert subscribed.sub == "settings" and subscribed.connection_id is None
+            event = await stream.__anext__()
+            assert isinstance(event, Event) and isinstance(event.data, SettingRow)
+            assert event.data.key == "stack_width_px" and event.data.value == 250
+            assert event.data.writable is None, "a stream frame carries no writable flag"
+        request = server.requests[0]
+        assert request["topic"] == "settings"
         assert "instrument" not in request and "connection_id" not in request
 
     run(test)

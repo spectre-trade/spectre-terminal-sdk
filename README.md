@@ -104,6 +104,7 @@ top, trades summary, clusters, candles — shaped for a model's context. See
 - [Account](docs/account.md) — orders, positions, balances, fills, and their stream topics
 - [Trading](docs/trading.md) — placing and cancelling orders, closing positions
 - [Workspace](docs/workspace.md) — windows, tabs, stacks and charts: reading the layout, opening and closing
+- [Settings](docs/settings.md) — the settings table, a stack's resolved settings, writing as the Settings App does
 - [Streaming](docs/streaming.md) — `/v1/stream`: subscriptions, gaps, conflation, close codes
 - [Errors](docs/errors.md) — the error envelope and every code
 - [Compatibility](docs/compatibility.md) — terminal × API × SDK matrix

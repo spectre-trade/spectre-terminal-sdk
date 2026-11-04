@@ -43,11 +43,15 @@ import type {
   OpenStackRequest,
   OpenTarget,
   Orderbook,
+  OrderbookSettings,
   OrderType,
   PlaceOrderRequest,
   PlaceTriggerRequest,
   SetLeverageRequest,
   SetMarginModeRequest,
+  SettingChange,
+  Settings,
+  SettingsApplied,
   Side,
   Snapshot,
   StackInstrumentRequest,
@@ -55,6 +59,7 @@ import type {
   Trades,
   TriggerRule,
   TriggerType,
+  UpdateSettingsRequest,
   Workspace,
   WorkspaceOutcome,
   WorkspaceWindow,
@@ -289,6 +294,18 @@ export interface StackInstrumentOptions {
   widgetId: number;
   instrument: InstrumentAddress;
   connectionId?: number;
+}
+
+/** Options of {@link Terminal.settings}: all optional filters. */
+export interface SettingsOptions {
+  /** `global` (default) or `order_book`. */
+  scope?: "global" | "order_book";
+  category?: string;
+  key?: string;
+  /** The connection's rows; without it the rows without a connection. */
+  connectionId?: number;
+  /** The pair's rows (scope `order_book`). */
+  instrument?: InstrumentAddress;
 }
 
 /** Options of {@link Terminal.stream}. */
@@ -753,6 +770,52 @@ export class Terminal {
     return this.#request<WorkspaceOutcome>("POST", `workspace/windows/${windowPath(options.windowId)}/activate`, {
       body: {},
     });
+  }
+
+  // --- settings ------------------------------------------------------------
+
+  /**
+   * `GET /v1/settings` (`settings:read`): rows as stored, without the default
+   * ladder. Without options: the global rows without a connection. Each row
+   * says whether it is `writable` through {@link updateSettings}.
+   */
+  settings(options: SettingsOptions = {}): Promise<Settings> {
+    return this.#get<Settings>("settings", {
+      scope: options.scope,
+      category: options.category,
+      key: options.key,
+      connection_id: options.connectionId,
+      instrument: options.instrument,
+    });
+  }
+
+  /**
+   * `GET /v1/settings/orderbook` (`settings:read`): the stack settings of an
+   * instrument as its stack on the connection sees them — the pair's row, the
+   * connection's default, the pair's row without a connection, the global
+   * default — with `resolved_from` on every key.
+   */
+  orderbookSettings(options: InstrumentCommandOptions): Promise<OrderbookSettings> {
+    return this.#get<OrderbookSettings>("settings/orderbook", {
+      connection_id: options.connectionId,
+      instrument: options.instrument,
+    });
+  }
+
+  /**
+   * `PATCH /v1/settings` (`settings:write`): write settings the way the
+   * Settings App does. Every change is checked against the terminal's
+   * catalogue first (`invalid_request` naming `changes[i]`, nothing written;
+   * leverage is `unsupported` here — use {@link setLeverage}), then applied in
+   * order: the same row, window event and service caches as the Settings App.
+   * The first failed change rejects the call; earlier ones stay applied.
+   */
+  updateSettings(changes: SettingChange[]): Promise<SettingsApplied> {
+    if (changes.length === 0) {
+      throw new RangeError("changes must not be empty");
+    }
+    const body: UpdateSettingsRequest = { changes };
+    return this.#request<SettingsApplied>("PATCH", "settings", { body });
   }
 
   /** Open `/v1/stream`. Node only: the token goes in the handshake header. */

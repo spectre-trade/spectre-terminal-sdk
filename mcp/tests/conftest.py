@@ -36,6 +36,8 @@ ROUTES = {
     "/v1/account/leverage": "leverage.json",
     "/v1/workspace": "workspace.json",
     "/v1/workspace/windows/1": "workspace_window.json",
+    "/v1/settings": "settings.json",
+    "/v1/settings/orderbook": "settings_orderbook.json",
 }
 
 
@@ -113,6 +115,14 @@ class _Handler(BaseHTTPRequestHandler):
             return
         if url.path.startswith("/v1/workspace"):
             self._workspace_write(method, url.path)
+            return
+        if url.path == "/v1/settings":
+            changes = body.get("changes") or []
+            for index, change in enumerate(changes):
+                if change.get("key") == "nope":
+                    self._error(400, "invalid_request", f"changes[{index}]: unknown setting")
+                    return
+            self._send(200, {"applied": len(changes)})
             return
         connection_id = body.get("connection_id") or (
             int(parse_qs(url.query).get("connection_id", ["0"])[0])

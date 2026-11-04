@@ -33,4 +33,9 @@ is a major bump and happens only with a new API version of the terminal.
   `workspace` stream topic, and the MCP tools `workspace`, `open_stack`,
   `open_multiview`, `set_stack_instrument`, `close_stack`, `close_tab`,
   `activate_tab`, `close_window`, `activate_window`.
+- Settings: `settings`, `orderbook_settings`, `update_settings` in both
+  clients, the `SettingRow`, `Settings`, `OrderbookSettings`,
+  `SettingChange` and `SettingsApplied` models, the `settings` stream
+  topic, and the MCP tools `settings`, `orderbook_settings`,
+  `update_settings`.
 - The contract copy (`contract/`) pinned to a terminal revision.

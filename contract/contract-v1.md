@@ -75,9 +75,9 @@ There is no CORS layer on purpose: a browser page must not reach the API.
 | `forbidden_scope` | 403 | the token lacks the operation's scope |
 | `not_found` | 404 | no such operation, connection, or no connection for the instrument |
 | `invalid_request` | 400 | parameters: bad instrument, interval, depth, foreign `connection_id` |
-| `unsupported` | 501 | the venue's data is not relayed (MOEX) or the terminal was built without the market-data tap |
+| `unsupported` | 501 | the venue's data is not relayed (MOEX), the terminal was built without the market-data tap, or a setting is not written through the API (leverage, service rows) |
 | `not_active` | 409 | clusters of the instrument are not being computed yet (see `/market/clusters`) or the instrument's leverage is not loaded yet (see `/account/leverage`) |
-| `rate_limited` | 429 | ceiling on connections, subscriptions, instruments, subscription rate, trading commands or workspace commands |
+| `rate_limited` | 429 | ceiling on connections, subscriptions, instruments, subscription rate, trading commands, workspace commands or settings writes |
 | `not_tradable` | 409 | the connection does not trade: disabled, read-only or without credentials |
 | `unavailable` | 503 | storage, exchange, coordinator or the window did not answer; no data yet |
 
@@ -761,7 +761,114 @@ listener (`rate_limited` beyond that); no window at all (headless) or a
 window that did not answer within 2 s — `503 unavailable`, the command is
 not retried.
 
-## Stream `/v1/stream` — `market:read` (account topics: `account:read`, `workspace`: `workspace:read`)
+## Settings — `settings:read`, `settings:write`
+
+The terminal's settings table: a row is `scope`, `scope_id`,
+`connection_id`, `category`, `key`, `value` (JSON). Two scopes: `global`
+(the terminal as a whole; `scope_id` is `default`, `null` for hotkeys) and
+`order_book` (a stack; `scope_id` is an instrument address or `default`,
+`connection_id` a connection or `null`). Stack settings resolve down a
+ladder, as in the window: the pair's row on the connection → the
+connection's default → the pair's row without a connection → the global
+default.
+
+A write goes **the same way as the Settings App**: the same row in the
+database, the same event to the window, the same service caches, the same
+exchange commands (a cluster interval change, the average-price mode). One
+difference: the value is first checked against the terminal's settings
+catalogue — the terminal trusts its own window, not an external program.
+An unknown key, a wrong type, a value out of range or of the wrong shape is
+`400 invalid_request` before anything is written.
+
+### `GET /v1/settings`
+
+| Parameter | Value |
+| --- | --- |
+| `scope` | `global` (default) or `order_book` |
+| `category`, `key` | filters |
+| `connection_id` | the connection's rows; without it the rows without a connection |
+| `instrument` | the pair's rows (`scope` is `order_book`) |
+
+```json
+{
+  "data": [
+    { "scope": "global", "scope_id": "default", "connection_id": null,
+      "category": "multiview", "key": "stack_width_px", "value": 250, "writable": true }
+  ]
+}
+```
+
+Rows as stored, no default ladder, ordered by `scope`, `scope_id`,
+`category`, `key`. `writable` says whether `PATCH` below accepts the key:
+`false` for leverage (`trading/leverage_mode` has its own operation
+`/v1/account/leverage`) and for service rows (`app/settings`,
+`modal_window/*`). Numbers come back as written. An unknown
+`connection_id` is `404 not_found`.
+
+### `GET /v1/settings/orderbook?instrument=…&connection_id=…`
+
+```json
+{
+  "connection_id": 12,
+  "instrument": "binance:futures:BTCUSDT",
+  "data": {
+    "general": {
+      "auto_scroll": { "value": false, "resolved_from": "global", "writable": true }
+    },
+    "trading": {
+      "slippage": { "value": { "value": "0.1", "type": "percent" }, "resolved_from": "instrument", "writable": true }
+    }
+  }
+}
+```
+
+The stack settings of the instrument as the stack on this connection sees
+them, by category and key; `resolved_from` is the level the value came
+from: `instrument` (the pair's row on the connection), `connection` (the
+connection's default), `app_instrument` (the pair's row without a
+connection), `global`. `connection_id` is required; a foreign connection
+is `400 invalid_request`.
+
+### `PATCH /v1/settings`
+
+```json
+{
+  "changes": [
+    { "category": "multiview", "key": "stack_width_px", "value": 300 },
+    { "instrument": "binance:futures:XRPUSDT", "connection_id": 25,
+      "category": "trading", "key": "slippage", "value": { "value": "0.1", "type": "percent" } },
+    { "scope": "order_book", "connection_id": 25,
+      "category": "general", "key": "auto_scroll", "value": true },
+    { "category": "appearance", "key": "theme", "value": { "stack": "dark" } },
+    { "category": "hotkeys_orderbook", "key": "close_position",
+      "value": { "code": "KeyX", "modifiers": [] } }
+  ]
+}
+```
+
+| Field | Value |
+| --- | --- |
+| `scope` | `global` (default) or `order_book`; with `instrument` always `order_book` |
+| `instrument` | the pair's row; `connection_id` then by the general rule |
+| `connection_id` | for `order_book` without `instrument` — this connection's default; without it the global default. Not accepted for `global` |
+| `category`, `key`, `value` | address and value per the catalogue |
+
+Up to 100 changes per request; all are checked, then applied in order. The
+first one that could not be applied stops the list: the answer names its
+index (`changes[2]: …`), the ones already applied are not rolled back —
+the same path as the window wrote them, and the window already knows.
+The answer is `{ "applied": 3 }`.
+
+Special keys go through their own services: `appearance/theme` — an object
+with any subset of `stack`, `graphic`, `interface` (theme names; chart and
+interface accept only `light` and `dark`), `appearance/font_family`,
+`localization/current_language`, `hotkeys_*` (a terminal action, the value
+`{ "code", "modifiers" }` or `null`; a combination another action already
+uses is `invalid_request`). `trading/leverage_mode` and service rows are
+`501 unsupported`. At most 5 requests per second per listener
+(`rate_limited`).
+
+## Stream `/v1/stream` — `market:read` (account topics: `account:read`, `workspace`: `workspace:read`, `settings`: `settings:read`)
 
 WebSocket at the same address: `ws://127.0.0.1:48180/v1/stream`, the token in
 the handshake header. All frames are text JSON with a `type` field.
@@ -773,6 +880,7 @@ the handshake header. All frames are text JSON with a `type` field.
   "instrument": "binance:futures:BTCUSDT", "connection_id": 12, "params": {} }
 { "type": "subscribe", "request_id": "r3", "topic": "account.fills", "connection_id": 12 }
 { "type": "subscribe", "request_id": "r4", "topic": "workspace" }
+{ "type": "subscribe", "request_id": "r5", "topic": "settings" }
 { "type": "unsubscribe", "request_id": "r2", "sub": "7:trades" }
 ```
 
@@ -780,8 +888,9 @@ the handshake header. All frames are text JSON with a `type` field.
 topics `instrument` is required and `connection_id` is chosen by the general
 rule. For account topics (`account.*`) it is the other way round:
 `connection_id` is required, `instrument` is not used, and the scope is
-`account:read`. `workspace` takes neither, with the scope `workspace:read`.
-`params` apply only to `book.top`; other topics ignore them.
+`account:read`. `workspace` and `settings` take neither, with the scopes
+`workspace:read` and `settings:read`. `params` apply only to `book.top`;
+other topics ignore them.
 
 ### Responses and events
 
@@ -795,10 +904,11 @@ rule. For account topics (`account.*`) it is the other way round:
 ```
 
 - `sub` is the subscription identifier, `"{stream}:{topic}"`; for account
-  topics `"{connection}:account.<topic>"`, for the layout `"workspace"`. It
-  is the same for every client subscribed to the pair and topic;
-  `unsubscribe` accepts only it. `connection_id` in `subscribed` is present
-  for market and account topics; `workspace` has none.
+  topics `"{connection}:account.<topic>"`, for the layout `"workspace"`,
+  for settings `"settings"`. It is the same for every client subscribed to
+  the pair and topic; `unsubscribe` accepts only it. `connection_id` in
+  `subscribed` is present for market and account topics; `workspace` and
+  `settings` have none.
 - `seq` is the event number within the subscription; it grows by one for
   `trades`. For conflated topics gaps in the numbering are normal.
 - `gap` arrives before the first frame after a loss, only for `trades`: the
@@ -822,6 +932,7 @@ rule. For account topics (`account.*`) it is the other way round:
 | `account.balances` | — | one currency's balance, as an element of `/account/balances` | conflation |
 | `account.fills` | — | one fill, as an element of `/account/fills` | a frame per fill; one that does not fit is lost and `seq` shows the gap — re-read `/account/fills` with `since_ts` |
 | `workspace` | — | the whole layout snapshot, as `data` in `/workspace` | the first frame is the current snapshot right on subscribe; then a frame per change; conflated: the latest state |
+| `settings` | — | one written row, as an element of `data` in `/settings` (without `writable`) | a frame per row written to the settings table — from the API, from the Settings App, from the window itself (compression by wheel, volume presets); no snapshot on subscribe — the current state is read with `/settings`; a frame that does not fit is lost and `seq` shows the gap |
 
 `book.top` parameters are per subscriber; values out of range give
 `error invalid_request` on the request. A `clusters` frame arrives for every
@@ -864,7 +975,9 @@ Printed in `/v1/meta`; a refusal is `error rate_limited` on the request or a
 
 ## What the API does not do in v1
 
-- It does not write settings. Of the layout, it does not open empty
+- Of settings, it does not write leverage (that has its own operation)
+  nor the window's service rows, and accepts no setting outside its
+  catalogue. Of the layout, it does not open empty
   windows, nor the screener, finres and orders windows, does not move
   stacks between tabs and does not change column widths — those are read
   only. Of trading, there is no grid move by dragging (`MoveOrderGrid`) and
@@ -888,12 +1001,17 @@ Printed in `/v1/meta`; a refusal is `error rate_limited` on the request or a
   `contract` test, and that is v2, not a v1 change.
 - The market-data tap is built by the `local-api` feature, which is in the
   default build. A build without the tap: `cargo build --no-default-features`;
-  in it only `workspace` remains in `topics` (the layout is published by the
-  window, not the loop), and the stream of market topics and the market
-  operations answer `unsupported`.
+  in it only `workspace` and `settings` remain in `topics` (the layout is
+  published by the window and settings by the repository, not the loop),
+  and the stream of market topics and the market operations answer
+  `unsupported`.
 - The layout: the snapshot lives in `src/modules/workspace/`, published by
   `ui/app_handler/workspace_api.rs`; commands reach the window as the
   `UserEvent::Workspace` event through the `WorkspaceGateway`.
+- Settings: the write path is `modules/settings/apply.rs` (the Settings App
+  WS controller calls it too), the catalogue is
+  `modules/settings/catalog.rs` (a new window setting is a line there), the
+  topic's tap is `settings::tap::written` called from the repository.
 - Load run: `cargo test --release --features local-api-bench --test it
   local_api::load -- --ignored --nocapture`. Cost of the tap per event:
   `cargo test --release --features local-api-bench --lib market_feed_cost --

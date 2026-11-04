@@ -176,6 +176,8 @@ class FakeTerminal:
             return override.status, body, override.headers
         if path.startswith("/v1/workspace"):
             return self._workspace(method, path, body_in)
+        if path.startswith("/v1/settings"):
+            return self._settings(method, path, query, body_in)
         if path.startswith("/v1/account/") and method == "GET":
             return self._account(path, query)
         if path.startswith("/v1/orders") or path in WRITE_PATHS:
@@ -214,6 +216,45 @@ class FakeTerminal:
         if name is None:
             return 404, load_fixture("error"), {}
         return 200, load_fixture(name), {}
+
+    @staticmethod
+    def _settings(
+        method: str, path: str, query: dict[str, list[str]], body_in: Any
+    ) -> tuple[int, Any, dict[str, str]]:
+        """``/v1/settings*``: fixtures on read; a write answers the applied fixture.
+
+        A change whose ``key`` is ``nope`` is ``invalid_request`` naming its
+        index, ``leverage_mode`` is ``unsupported``, like the terminal.
+        """
+        if method == "GET" and path == "/v1/settings":
+            if query.get("connection_id") not in (None, [str(CONNECTION_ID)]):
+                return 404, error_body("not_found", "no such connection"), {}
+            return 200, load_fixture("settings"), {}
+        if method == "GET" and path == "/v1/settings/orderbook":
+            if query.get("connection_id") != [str(CONNECTION_ID)]:
+                return 400, error_body("invalid_request", "connection is not of this venue"), {}
+            return 200, load_fixture("settings_orderbook"), {}
+        if method == "PATCH" and path == "/v1/settings":
+            changes = body_in.get("changes") if isinstance(body_in, dict) else None
+            if not changes:
+                return 400, error_body("invalid_request", "changes must not be empty"), {}
+            for index, change in enumerate(changes):
+                if change.get("key") == "nope":
+                    return (
+                        400,
+                        error_body("invalid_request", f"changes[{index}]: unknown setting"),
+                        {},
+                    )
+                if change.get("key") == "leverage_mode":
+                    return (
+                        501,
+                        error_body(
+                            "unsupported", f"changes[{index}]: leverage has its own operation"
+                        ),
+                        {},
+                    )
+            return 200, {"applied": len(changes)}, {}
+        return 404, load_fixture("error"), {}
 
     @staticmethod
     def _workspace(method: str, path: str, body_in: Any) -> tuple[int, Any, dict[str, str]]:

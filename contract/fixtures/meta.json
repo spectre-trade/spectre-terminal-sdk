@@ -20,7 +20,8 @@
     "api_only_instruments": 50,
     "exchange_subscriptions_per_second": 5,
     "commands_per_second": 10,
-    "workspace_commands_per_second": 5
+    "workspace_commands_per_second": 5,
+    "settings_commands_per_second": 5
   },
   "topics": []
 }

@@ -50,6 +50,7 @@ const KNOWN_TOPICS: ReadonlySet<string> = new Set<Topic>([
   "account.balances",
   "account.fills",
   "workspace",
+  "settings",
 ]);
 
 /** Account topics are keyed by connection, not instrument. */
@@ -57,17 +58,18 @@ function isAccountTopic(topic: Topic): boolean {
   return topic.startsWith("account.");
 }
 
-/** The layout topic takes neither instrument nor connection. */
+/** The terminal's own topics (`workspace`, `settings`) take neither instrument nor connection. */
 function isWorkspaceTopic(topic: Topic): boolean {
-  return topic === "workspace";
+  return topic === "workspace" || topic === "settings";
 }
 
 /**
  * Options of {@link Stream.subscribe}. Market topics (`trades`, `ticker`,
  * `mark_price`, `book.top`, `clusters`) take `instrument`, with
  * `connectionId` chosen by the general rule when omitted; account topics
- * (`account.*`) take `connectionId` and no instrument; `workspace` takes
- * neither and gets the current layout as its first frame.
+ * (`account.*`) take `connectionId` and no instrument; `workspace` and
+ * `settings` take neither — `workspace` gets the current layout as its first
+ * frame, `settings` a frame per written row.
  */
 export interface SubscribeOptions {
   topic: Topic;

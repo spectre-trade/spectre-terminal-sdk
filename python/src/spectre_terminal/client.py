@@ -16,7 +16,7 @@ import logging
 import urllib.error
 import urllib.parse
 import urllib.request
-from collections.abc import Iterator, Mapping
+from collections.abc import Iterator, Mapping, Sequence
 from decimal import Decimal
 from typing import Any
 
@@ -43,7 +43,11 @@ from .models import (
     Leverage,
     Meta,
     OrderBook,
+    OrderbookSettings,
     Page,
+    SettingChange,
+    Settings,
+    SettingsApplied,
     Snapshot,
     Trades,
     Window,
@@ -774,6 +778,64 @@ class Terminal:
         return WorkspaceOutcome.from_dict(
             self._send("POST", f"/workspace/windows/{int(window_id)}/activate", {})
         )
+
+    # --- settings ---------------------------------------------------------
+
+    def settings(
+        self,
+        *,
+        scope: str | None = None,
+        category: str | None = None,
+        key: str | None = None,
+        connection_id: int | None = None,
+        instrument: str | None = None,
+    ) -> Settings:
+        """``GET /v1/settings`` (``settings:read``): rows as stored, no default ladder.
+
+        Without parameters: the global rows without a connection.
+        ``instrument`` lists the pair's rows (scope ``order_book``);
+        ``connection_id`` the connection's rows. Each row says whether it is
+        ``writable`` through :meth:`update_settings`.
+        """
+        return Settings.from_dict(
+            self._get(
+                "/settings",
+                scope=scope,
+                category=category,
+                key=key,
+                connection_id=None if connection_id is None else int(connection_id),
+                instrument=instrument,
+            )
+        )
+
+    def orderbook_settings(self, connection_id: int, instrument: str) -> OrderbookSettings:
+        """``GET /v1/settings/orderbook`` (``settings:read``): stack settings, resolved.
+
+        The ladder the window uses — the pair's row on the connection, the
+        connection's default, the pair's row without a connection, the global
+        default — with ``resolved_from`` on every key.
+        """
+        return OrderbookSettings.from_dict(
+            self._get(
+                "/settings/orderbook", connection_id=int(connection_id), instrument=instrument
+            )
+        )
+
+    def update_settings(self, changes: Sequence[SettingChange]) -> SettingsApplied:
+        """``PATCH /v1/settings`` (``settings:write``): write settings as the Settings App does.
+
+        Every change is checked against the terminal's catalogue first
+        (unknown key, wrong type, out of range, wrong shape —
+        ``invalid_request`` naming ``changes[i]``, nothing written); leverage
+        is ``unsupported`` here (use :meth:`set_leverage`). Then the changes
+        are applied in order: the same row, window event and service caches
+        as the Settings App. The first failed change stops the list and
+        raises; earlier ones stay applied.
+        """
+        if not changes:
+            raise ValueError("changes must not be empty")
+        body = {"changes": [change.to_dict() for change in changes]}
+        return SettingsApplied.from_dict(self._send("PATCH", "/settings", body))
 
     def stream(self) -> Stream:
         """A :class:`~spectre_terminal.stream.Stream` for ``/v1/stream``, for ``async with``."""

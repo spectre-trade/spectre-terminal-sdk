@@ -25,7 +25,8 @@ clients add the header for you and never put the token into error messages,
 | `trading:write` | `/v1/orders`, `/v1/orders/trigger`, `/v1/positions/close`, `/v1/account/leverage`, `/v1/account/margin-mode` |
 | `workspace:read` | `/v1/workspace` and the `workspace` stream topic |
 | `workspace:write` | opening, closing and selecting stacks, tabs and windows under `/v1/workspace` |
-| `settings:read`, `settings:write` | granted ahead of the settings operations; no operation takes them yet |
+| `settings:read` | `/v1/settings`, `/v1/settings/orderbook` and the `settings` stream topic |
+| `settings:write` | `PATCH /v1/settings` |
 
 `/v1/meta` and `/v1/health` need any valid token. All scopes are
 granted: there is no separate write switch, the Local API toggle is the one

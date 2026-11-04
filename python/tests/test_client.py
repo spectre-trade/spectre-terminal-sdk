@@ -16,6 +16,7 @@ from spectre_terminal import (
     Level,
     Order,
     Position,
+    SettingChange,
     SpectreTerminalError,
     Terminal,
     TerminalUnreachable,
@@ -686,3 +687,92 @@ def test_stack_tab_and_window_commands_use_their_routes(fake_terminal: FakeTermi
     with pytest.raises(ApiError) as error:
         terminal.close_stack(99)
     assert error.value.code == "not_found"
+
+
+# --- settings -----------------------------------------------------------------
+
+
+def test_settings_reads_rows_and_the_orderbook_ladder(fake_terminal: FakeTerminal) -> None:
+    terminal = client(fake_terminal)
+    settings = terminal.settings(category="multiview", key="stack_width_px")
+    request = fake_terminal.last
+    assert request.method == "GET" and request.path == "/v1/settings"
+    assert request.query == {"category": ["multiview"], "key": ["stack_width_px"]}
+    row = settings.get("multiview", "stack_width_px")
+    assert row is not None and row.value == 250 and row.writable is True
+    assert row.scope == "global" and row.scope_id == "default" and row.connection_id is None
+
+    terminal.settings(instrument=INSTRUMENT, connection_id=12, scope="order_book")
+    assert fake_terminal.last.query == {
+        "instrument": [INSTRUMENT],
+        "connection_id": ["12"],
+        "scope": ["order_book"],
+    }
+    with pytest.raises(ApiError) as error:
+        terminal.settings(connection_id=77)
+    assert error.value.code == "not_found"
+
+    book = terminal.orderbook_settings(12, INSTRUMENT)
+    request = fake_terminal.last
+    assert request.path == "/v1/settings/orderbook"
+    assert request.query == {"connection_id": ["12"], "instrument": [INSTRUMENT]}
+    assert book.connection_id == 12 and book.instrument == INSTRUMENT
+    auto_scroll = book.get("general", "auto_scroll")
+    assert auto_scroll is not None
+    assert (auto_scroll.value, auto_scroll.resolved_from, auto_scroll.writable) == (
+        False,
+        "global",
+        True,
+    )
+    assert book.get("general", "nope") is None
+    with pytest.raises(ApiError) as error:
+        terminal.orderbook_settings(77, INSTRUMENT)
+    assert error.value.code == "invalid_request"
+
+
+def test_update_settings_sends_the_changes_and_keeps_the_refusal_index(
+    fake_terminal: FakeTerminal,
+) -> None:
+    terminal = client(fake_terminal)
+    applied = terminal.update_settings(
+        [
+            SettingChange("multiview", "stack_width_px", 300),
+            SettingChange("general", "auto_scroll", True, instrument=INSTRUMENT, connection_id=12),
+            SettingChange("general", "trim_trailing_zeros", False, scope="order_book"),
+        ]
+    )
+    request = fake_terminal.last
+    assert request.method == "PATCH" and request.path == "/v1/settings"
+    assert request.body == {
+        "changes": [
+            {"category": "multiview", "key": "stack_width_px", "value": 300},
+            {
+                "category": "general",
+                "key": "auto_scroll",
+                "value": True,
+                "instrument": INSTRUMENT,
+                "connection_id": 12,
+            },
+            {
+                "category": "general",
+                "key": "trim_trailing_zeros",
+                "value": False,
+                "scope": "order_book",
+            },
+        ]
+    }
+    assert applied.applied == 3
+
+    with pytest.raises(ValueError):
+        terminal.update_settings([])
+    with pytest.raises(ApiError) as error:
+        terminal.update_settings(
+            [SettingChange("multiview", "open_mode", "tab"), SettingChange("nope", "nope", 1)]
+        )
+    assert error.value.code == "invalid_request"
+    assert "changes[1]" in str(error.value)
+    with pytest.raises(ApiError) as error:
+        terminal.update_settings(
+            [SettingChange("trading", "leverage_mode", {"mode": "max"}, scope="order_book")]
+        )
+    assert (error.value.code, error.value.status) == ("unsupported", 501)

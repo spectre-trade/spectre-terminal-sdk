@@ -63,10 +63,12 @@ running; the first tool call then answers `terminal_unreachable`.
 | `open_stack`, `open_multiview` | a stack (with a chart if asked) in a new tab or window; a coin on every venue of «Exchange layout» |
 | `set_stack_instrument`, `close_stack` | re-point or close one stack by `widget_id` |
 | `close_tab`, `activate_tab`, `close_window`, `activate_window` | tabs by window and tab id, windows by id; the main window and a window's only tab never close |
+| `settings`, `orderbook_settings` | settings rows as stored; a stack's settings resolved the way the stack sees them, with the level each came from |
+| `update_settings` | writes settings through the Settings App's own path after the terminal checked each change |
 
 Read tools are read-only and idempotent and say so in their annotations; the
-ten trading tools and the eight workspace commands are annotated as
-destructive, so an MCP client may ask the user before each call. Trading answers mean "accepted by the terminal", not
+ten trading tools, the eight workspace commands and `update_settings` are
+annotated as destructive, so an MCP client may ask the user before each call. Trading answers mean "accepted by the terminal", not
 "filled": the outcome is read from `open_orders` and `recent_fills`.
 Prices and sizes are decimal strings; times are UTC milliseconds plus an ISO
 twin. Errors start with a stable code (`unauthorized`, `not_found`,

@@ -1,0 +1,9 @@
+{
+  "connection_id": 12,
+  "instrument": "binance:futures:BTCUSDT",
+  "data": {
+    "general": {
+      "auto_scroll": { "value": false, "resolved_from": "global", "writable": true }
+    }
+  }
+}

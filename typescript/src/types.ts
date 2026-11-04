@@ -37,11 +37,14 @@ export type MarketTopic = "trades" | "ticker" | "mark_price" | "book.top" | "clu
 /** Account topics: `connection_id` is required on subscribe, `instrument` is not used. */
 export type AccountTopic = "account.orders" | "account.positions" | "account.balances" | "account.fills";
 
-/** The layout topic: one per terminal, subscribed without instrument or connection. */
+/** The terminal's own topics: one per terminal, subscribed without instrument or connection. */
+export type TerminalTopic = "workspace" | "settings";
+
+/** @deprecated use {@link TerminalTopic}. */
 export type WorkspaceTopic = "workspace";
 
 /** Stream topics known to v1. */
-export type Topic = MarketTopic | AccountTopic | WorkspaceTopic;
+export type Topic = MarketTopic | AccountTopic | TerminalTopic;
 
 /** Error codes of the contract. New codes may appear within v1. */
 export type ErrorCode =
@@ -110,6 +113,8 @@ export interface Limits {
   commands_per_second?: number;
   /** Workspace commands per second per listener. Absent before the window stage. */
   workspace_commands_per_second?: number;
+  /** Settings writes per second per listener. Absent before the settings stage. */
+  settings_commands_per_second?: number;
 }
 
 /** `GET /v1/meta`. */
@@ -703,6 +708,74 @@ export interface WorkspaceOutcome {
 }
 
 // ---------------------------------------------------------------------------
+// /v1/settings
+
+/**
+ * One row of the terminal's settings table, as stored. `scope` is `global`
+ * or `order_book`; `scope_id` is `default`, an instrument address, or `null`
+ * for hotkeys; `connection_id` is the owning connection or `null`. `value`
+ * is the decoded JSON, numbers as written. `writable` says whether
+ * `PATCH /v1/settings` accepts the key; a `settings` stream frame carries no
+ * such flag.
+ */
+export interface SettingRow {
+  scope: string;
+  scope_id: string | null;
+  connection_id: number | null;
+  category: string;
+  key: string;
+  value: unknown;
+  writable?: boolean;
+}
+
+/** `GET /v1/settings`: rows as stored, without the default ladder. */
+export interface Settings {
+  data: SettingRow[];
+}
+
+/** The level a stack setting was resolved from. */
+export type ResolvedFrom = "instrument" | "connection" | "app_instrument" | "global" | OpenString;
+
+/** One stack setting with the level it came from. */
+export interface OrderbookSetting {
+  value: unknown;
+  resolved_from: ResolvedFrom;
+  writable: boolean;
+}
+
+/** `GET /v1/settings/orderbook`: `data[category][key]` as the instrument's stack sees them. */
+export interface OrderbookSettings {
+  connection_id: number;
+  instrument: InstrumentAddress;
+  data: Record<string, Record<string, OrderbookSetting>>;
+}
+
+/**
+ * One change of `PATCH /v1/settings`. `instrument` addresses the pair's row
+ * (scope `order_book`); `connection_id` with `scope: "order_book"` and no
+ * instrument addresses the connection's default; neither addresses the
+ * global default. Global settings take no connection.
+ */
+export interface SettingChange {
+  scope?: "global" | "order_book";
+  instrument?: InstrumentAddress;
+  connection_id?: number;
+  category: string;
+  key: string;
+  value: unknown;
+}
+
+/** The body of `PATCH /v1/settings`. */
+export interface UpdateSettingsRequest {
+  changes: SettingChange[];
+}
+
+/** `PATCH /v1/settings`: how many changes were applied (all of them, or the call rejected). */
+export interface SettingsApplied {
+  applied: number;
+}
+
+// ---------------------------------------------------------------------------
 // /v1/stream
 
 /** Parameters of a `book.top` subscription; other topics take none. Wire names. */
@@ -850,6 +923,11 @@ export interface WorkspaceEvent extends EventFrame<WorkspaceSnapshot> {
   topic: "workspace";
 }
 
+/** `data` of a `settings` event: one written row, without `writable`. */
+export interface SettingsEvent extends EventFrame<SettingRow> {
+  topic: "settings";
+}
+
 /**
  * An event of a topic this client version does not know (the contract may add
  * topics within v1). `topic` is `undefined`; the raw topic name is the part of
@@ -871,6 +949,7 @@ export type Event =
   | AccountBalancesEvent
   | AccountFillsEvent
   | WorkspaceEvent
+  | SettingsEvent
   | UnknownTopicEvent;
 
 /** What iterating a {@link Stream} yields, in arrival order. */

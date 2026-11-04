@@ -31,6 +31,7 @@ export type {
   PlaceTriggerOptions,
   SetLeverageOptions,
   SetMarginModeOptions,
+  SettingsOptions,
   StackInstrumentOptions,
   StackOptions,
   StreamOptions,

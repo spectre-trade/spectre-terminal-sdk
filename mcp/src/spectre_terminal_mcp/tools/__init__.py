@@ -1,8 +1,9 @@
 """Tool registration: one module per family, one function per tool.
 
 Read tools are read-only and idempotent and say so in their annotations;
-the trading tools (`tools/trading.py`) and the workspace commands
-(`tools/workspace.py`) say the opposite, so an MCP client can tell them
+the trading tools (`tools/trading.py`), the workspace commands
+(`tools/workspace.py`) and the settings write (`tools/settings.py`) say the
+opposite, so an MCP client can tell them
 apart and confirm with the user if it wants to.
 """
 
@@ -12,7 +13,7 @@ from mcp.server.mcpserver import MCPServer
 from mcp.types import ToolAnnotations
 
 from ..terminal import TerminalProvider
-from . import account, instruments, market, status, trading, workspace
+from . import account, instruments, market, settings, status, trading, workspace
 
 __all__ = ["READ_ONLY", "register_tools"]
 
@@ -32,3 +33,4 @@ def register_tools(server: MCPServer, provider: TerminalProvider) -> None:
     account.register(server, provider)
     trading.register(server, provider)
     workspace.register(server, provider)
+    settings.register(server, provider)

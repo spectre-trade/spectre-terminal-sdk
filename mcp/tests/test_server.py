@@ -44,6 +44,9 @@ EXPECTED_TOOLS = {
     "activate_tab",
     "close_window",
     "activate_window",
+    "settings",
+    "orderbook_settings",
+    "update_settings",
 }
 TRADING_TOOLS = {
     "place_order",
@@ -64,6 +67,7 @@ TRADING_TOOLS = {
     "activate_tab",
     "close_window",
     "activate_window",
+    "update_settings",
 }
 
 
@@ -521,3 +525,53 @@ async def test_workspace_tools(provider: TerminalProvider, fake_api: FakeApi) ->
     with pytest.raises(ToolError) as raised:
         await server.call_tool("close_stack", {"widget_id": 99})
     assert "not_found" in str(raised.value)
+
+
+async def test_settings_tools(provider: TerminalProvider, fake_api: FakeApi) -> None:
+    server = build_server(provider)
+    rows = _structured(await server.call_tool("settings", {"category": "multiview"}))
+    path, query, _headers = fake_api.requests[-1]
+    assert path == "/v1/settings" and query["category"] == ["multiview"]
+    assert rows["data"][0]["key"] == "stack_width_px" and rows["data"][0]["writable"] is True
+
+    book = _structured(
+        await server.call_tool(
+            "orderbook_settings", {"connection_id": 12, "instrument": "binance:futures:BTCUSDT"}
+        )
+    )
+    assert book["data"]["general"]["auto_scroll"]["resolved_from"] == "global"
+    assert "resolved_from names" in book["note"]
+
+    applied = _structured(
+        await server.call_tool(
+            "update_settings",
+            {
+                "changes": [
+                    {"category": "multiview", "key": "stack_width_px", "value": 300},
+                    {
+                        "instrument": "binance:futures:BTCUSDT",
+                        "connection_id": 12,
+                        "category": "general",
+                        "key": "auto_scroll",
+                        "value": True,
+                    },
+                ]
+            },
+        )
+    )
+    assert applied == {"applied": 2}
+    method, path, body = fake_api.bodies[-1]
+    assert (method, path) == ("PATCH", "/v1/settings")
+    assert body["changes"][1] == {
+        "category": "general",
+        "key": "auto_scroll",
+        "value": True,
+        "instrument": "binance:futures:BTCUSDT",
+        "connection_id": 12,
+    }
+
+    with pytest.raises(ToolError) as raised:
+        await server.call_tool(
+            "update_settings", {"changes": [{"category": "nope", "key": "nope", "value": 1}]}
+        )
+    assert "changes[0]" in str(raised.value)

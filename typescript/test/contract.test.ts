@@ -128,6 +128,7 @@ const limits = {
   // the fixture is the current terminal's answer and must carry it.
   commands_per_second: "int",
   workspace_commands_per_second: "int",
+  settings_commands_per_second: "int",
 } as const;
 
 const meta = {
@@ -411,6 +412,26 @@ const workspaceWindow = { data: window } as const;
 
 const workspaceOutcome = { window_id: "int?", tab_id: "int?", stacks: ["int"], charts: ["int"] } as const;
 
+const settingRow = {
+  scope: "string",
+  scope_id: "string?",
+  connection_id: "int?",
+  category: "string",
+  key: "string",
+  value: nullable("int"),
+  writable: "bool",
+} as const;
+
+const settings = { data: [settingRow] } as const;
+
+const settingsOrderbook = {
+  connection_id: "int",
+  instrument: "string",
+  data: { general: { auto_scroll: { value: "bool", resolved_from: "string", writable: "bool" } } },
+} as const;
+
+const settingsApplied = { applied: "int" } as const;
+
 const errorEnvelope = { error: { code: "string", message: "string" } } as const;
 
 /** Fixture file → the shape it must match. One entry per operation. */
@@ -435,6 +456,9 @@ const SHAPES: Record<string, Spec> = {
   "workspace.json": workspace,
   "workspace_window.json": workspaceWindow,
   "workspace_outcome.json": workspaceOutcome,
+  "settings.json": settings,
+  "settings_orderbook.json": settingsOrderbook,
+  "settings_applied.json": settingsApplied,
   "error.json": errorEnvelope,
 };
 

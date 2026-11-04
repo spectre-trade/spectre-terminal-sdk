@@ -95,6 +95,15 @@ the commands are annotated as destructive like trading:
 | `close_tab`, `activate_tab` | `window_id`, `tab_id` | closes or selects a tab; the only tab of a window never closes |
 | `close_window`, `activate_window` | `window_id` | closes a window or brings it to the front; the main window never closes |
 
+Settings tools — `settings` and `orderbook_settings` are read-only,
+`update_settings` is annotated as destructive:
+
+| Tool | Arguments | Does |
+| --- | --- | --- |
+| `settings` | optional `scope`, `category`, `key`, `connection_id`, `instrument` | rows as stored, each with `writable` |
+| `orderbook_settings` | `connection_id`, `instrument` | a stack's settings as the stack sees them, `resolved_from` on every key |
+| `update_settings` | `changes`: a list of `{category, key, value, scope?, instrument?, connection_id?}` | writes through the Settings App's path after the terminal checked every change; refuses by index, leverage is refused |
+
 Every tool that takes an instrument names the connection it used in the
 answer. Prices and sizes are decimal strings and should be kept as strings;
 timestamps are UTC milliseconds with an ISO twin (`ts` and `time`).

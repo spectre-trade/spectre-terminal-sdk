@@ -63,7 +63,8 @@ Every operation of the contract has a method: `meta`, `health`,
 `cancelAllTriggers`, `amendTrigger`, `leverage`, `setLeverage`,
 `setMarginMode`, `workspace`, `workspaceWindow`, `openStack`, `openMultiview`,
 `setStackInstrument`, `closeStack`, `closeTab`, `activateTab`, `closeWindow`,
-`activateWindow`, `stream`. Option names are
+`activateWindow`, `settings`, `orderbookSettings`, `updateSettings`, `stream`.
+Option names are
 camelCase; response fields keep the wire names from the contract.
 
 ## Account
@@ -154,6 +155,14 @@ whole layout on every change.
 const opened = await terminal.openStack({ instrument, chart: true, activate: false });
 await terminal.setStackInstrument({ widgetId: opened.stacks[0]!, instrument: "binance:futures:ETHUSDT" });
 await terminal.closeTab({ windowId: opened.window_id!, tabId: opened.tab_id! });
+```
+
+Settings are read as stored (`settings()`), resolved as a stack sees them
+(`orderbookSettings()`) and written through the same path as the Settings
+App after the terminal's catalogue checked every change (`updateSettings()`).
+
+```ts
+await terminal.updateSettings([{ category: "multiview", key: "stack_width_px", value: 300 }]);
 ```
 
 ## Money and time

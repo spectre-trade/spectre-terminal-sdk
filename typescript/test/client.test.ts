@@ -64,6 +64,9 @@ async function route(method: string, url: URL, body: unknown): Promise<Reply | u
   if (url.pathname.startsWith("/v1/workspace")) {
     return routeWorkspace(method, url, body);
   }
+  if (url.pathname.startsWith("/v1/settings")) {
+    return routeSettings(method, url, body);
+  }
   switch (url.pathname) {
     case "/v1/meta":
       return json("meta");
@@ -196,6 +199,29 @@ async function routeWorkspace(method: string, url: URL, body: unknown): Promise<
       if (parts.length === 4 && method === "DELETE") return envelope(400, "invalid_request", "the only tab");
       if (parts.length === 5 && parts[4] === "activate" && method === "POST") return reply({ tab_id: 1, stacks: [], charts: [] });
     }
+  }
+  return envelope(404, "not_found", "no such operation");
+}
+
+/** `/v1/settings*`: fixtures on read; a write answers `applied`, key `nope` is refused by index. */
+async function routeSettings(method: string, url: URL, body: unknown): Promise<Reply> {
+  if (method === "GET" && url.pathname === "/v1/settings") {
+    const connection = url.searchParams.get("connection_id");
+    if (connection !== null && connection !== "12") return envelope(404, "not_found", "no such connection");
+    return json("settings");
+  }
+  if (method === "GET" && url.pathname === "/v1/settings/orderbook") {
+    if (url.searchParams.get("connection_id") !== "12") return envelope(400, "invalid_request", "foreign connection");
+    return json("settings_orderbook");
+  }
+  if (method === "PATCH" && url.pathname === "/v1/settings") {
+    const changes = typeof body === "object" && body !== null && "changes" in body ? (body.changes as Array<Record<string, unknown>>) : [];
+    if (changes.length === 0) return envelope(400, "invalid_request", "changes must not be empty");
+    for (const [index, change] of changes.entries()) {
+      if (change.key === "nope") return envelope(400, "invalid_request", `changes[${index}]: unknown setting`);
+      if (change.key === "leverage_mode") return envelope(501, "unsupported", `changes[${index}]: leverage has its own operation`);
+    }
+    return { status: 200, body: JSON.stringify({ applied: changes.length }) };
   }
   return envelope(404, "not_found", "no such operation");
 }
@@ -752,4 +778,57 @@ test("stack, tab and window commands use their routes", async () => {
   const noStack = await t.closeStack({ widgetId: 99 }).catch((e: unknown) => e);
   assert.ok(noStack instanceof ApiError);
   assert.equal(noStack.code, "not_found");
+});
+
+test("settings reads rows and the orderbook ladder; updateSettings patches in order", async () => {
+  const t = terminal();
+  const settings = await t.settings({ category: "multiview", key: "stack_width_px" });
+  assert.equal(last().method, "GET");
+  assert.equal(last().url.pathname, "/v1/settings");
+  assert.deepEqual(params(last().url), { category: "multiview", key: "stack_width_px" });
+  assert.equal(settings.data[0]?.value, 250);
+  assert.equal(settings.data[0]?.writable, true);
+  assert.equal(settings.data[0]?.connection_id, null);
+
+  await t.settings({ instrument: INSTRUMENT, connectionId: 12, scope: "order_book" });
+  assert.deepEqual(params(last().url), { instrument: INSTRUMENT, connection_id: "12", scope: "order_book" });
+  const missing = await t.settings({ connectionId: 77 }).catch((e: unknown) => e);
+  assert.ok(missing instanceof ApiError);
+  assert.equal(missing.code, "not_found");
+
+  const book = await t.orderbookSettings({ connectionId: 12, instrument: INSTRUMENT });
+  assert.equal(last().url.pathname, "/v1/settings/orderbook");
+  assert.equal(book.connection_id, 12);
+  assert.equal(book.data.general?.auto_scroll?.resolved_from, "global");
+  assert.equal(book.data.general?.auto_scroll?.value, false);
+
+  const applied = await t.updateSettings([
+    { category: "multiview", key: "stack_width_px", value: 300 },
+    { instrument: INSTRUMENT, connection_id: 12, category: "general", key: "auto_scroll", value: true },
+  ]);
+  assert.equal(last().method, "PATCH");
+  assert.equal(last().url.pathname, "/v1/settings");
+  assert.deepEqual(last().body, {
+    changes: [
+      { category: "multiview", key: "stack_width_px", value: 300 },
+      { instrument: INSTRUMENT, connection_id: 12, category: "general", key: "auto_scroll", value: true },
+    ],
+  });
+  assert.equal(applied.applied, 2);
+
+  assert.throws(() => t.updateSettings([]), RangeError);
+  const refused = await t
+    .updateSettings([
+      { category: "multiview", key: "open_mode", value: "tab" },
+      { category: "nope", key: "nope", value: 1 },
+    ])
+    .catch((e: unknown) => e);
+  assert.ok(refused instanceof ApiError);
+  assert.equal(refused.code, "invalid_request");
+  assert.match(refused.detail ?? "", /changes\[1\]/);
+  const leverage = await t
+    .updateSettings([{ scope: "order_book", category: "trading", key: "leverage_mode", value: { mode: "max" } }])
+    .catch((e: unknown) => e);
+  assert.ok(leverage instanceof ApiError);
+  assert.equal(leverage.status, 501);
 });
