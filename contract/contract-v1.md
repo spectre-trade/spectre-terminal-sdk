@@ -74,7 +74,7 @@ There is no CORS layer on purpose: a browser page must not reach the API.
 | `forbidden` | 403 | `Origin` present or a foreign `Host` |
 | `forbidden_scope` | 403 | the token lacks the operation's scope |
 | `not_found` | 404 | no such operation, connection, or no connection for the instrument |
-| `invalid_request` | 400 | parameters: bad instrument, interval, depth, foreign `connection_id` |
+| `invalid_request` | 400 | parameters: bad or unknown-to-the-catalogue instrument, interval, depth, foreign `connection_id` |
 | `unsupported` | 501 | the venue's data is not relayed (MOEX), the terminal was built without the market-data tap, or a setting is not written through the API (leverage, service rows) |
 | `not_active` | 409 | clusters of the instrument are not being computed yet (see `/market/clusters`) or the instrument's leverage is not loaded yet (see `/account/leverage`) |
 | `rate_limited` | 429 | ceiling on connections, subscriptions, instruments, subscription rate, trading commands, workspace commands or settings writes |

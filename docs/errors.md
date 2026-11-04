@@ -17,7 +17,7 @@ include the token in the text.
 | `forbidden` | 403 | an `Origin` header or a foreign `Host` | you are not using the SDK, or something rewrote the request |
 | `forbidden_scope` | 403 | the token lacks the operation's scope | see `meta().scopes` |
 | `not_found` | 404 | unknown path, unknown connection, or no connection for the instrument's venue and market | check the instrument address and `connections()` |
-| `invalid_request` | 400 | bad instrument, interval, depth, cursor, or a `connection_id` of another venue | fix the parameters |
+| `invalid_request` | 400 | bad instrument, an instrument the terminal catalogue does not know, interval, depth, cursor, or a `connection_id` of another venue | fix the parameters |
 | `unsupported` | 501 | the venue is not relayed (MOEX), the terminal was built without the market-data tap (`meta().topics` lists only `workspace` and `settings`), or a setting is not written through the API (leverage, the terminal's service rows) | nothing to retry |
 | `not_active` | 409 | clusters of the instrument are not computed yet, or its leverage is not loaded yet | clusters: retry in a few seconds, the subscription is held; leverage: open the instrument in the terminal or set the leverage |
 | `rate_limited` | 429 | stream connections, subscriptions, API-only instruments, the per-second subscription rate, more than 10 trading commands, 5 workspace commands or 5 settings writes per second | wait and retry; reuse connections |
