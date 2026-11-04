@@ -1130,12 +1130,32 @@ class Workspace:
 
 
 @dataclass(frozen=True)
+class TabItem:
+    """One column of a tab opened or extended through the API.
+
+    A stack of ``instrument`` on ``connection_id`` (the general rule picks
+    one when ``None``) and, with ``chart``, a chart over it.
+    """
+
+    instrument: str
+    connection_id: int | None = None
+    chart: bool = False
+
+    def to_dict(self) -> dict[str, Any]:
+        body: dict[str, Any] = {"instrument": self.instrument, "chart": bool(self.chart)}
+        if self.connection_id is not None:
+            body["connection_id"] = int(self.connection_id)
+        return body
+
+
+@dataclass(frozen=True)
 class WorkspaceOutcome:
     """What the window did for a workspace command.
 
     For an opening: the window, the new tab and its ``stacks`` and
-    ``charts`` in column order. For closing and activating: the touched
-    ids, the rest ``None`` or empty.
+    ``charts`` in column order; for columns added to a tab only the added
+    widgets. For closing and activating: the touched ids, the rest
+    ``None`` or empty.
     """
 
     window_id: int | None

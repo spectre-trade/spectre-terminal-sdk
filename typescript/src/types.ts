@@ -689,6 +689,28 @@ export interface OpenMultiviewRequest {
   activate?: boolean;
 }
 
+/** One column of `POST /v1/workspace/tabs` and `…/tabs/{tab}/stacks`: a stack and, with `chart`, a chart over it. */
+export interface TabItemRequest {
+  instrument: InstrumentAddress;
+  connection_id?: number;
+  chart?: boolean;
+}
+
+/** The body of `POST /v1/workspace/tabs`: a column per item, one to fifty. */
+export interface OpenTabRequest {
+  items: TabItemRequest[];
+  /** Up to 64 characters; omitted, the terminal names the tab after the instruments. */
+  name?: string;
+  target?: OpenTarget;
+  window_id?: number;
+  activate?: boolean;
+}
+
+/** The body of `POST /v1/workspace/windows/{id}/tabs/{tab}/stacks`. */
+export interface AddStacksRequest {
+  items: TabItemRequest[];
+}
+
 /** The body of `PATCH /v1/workspace/stacks/{widget_id}`. */
 export interface StackInstrumentRequest {
   instrument: InstrumentAddress;

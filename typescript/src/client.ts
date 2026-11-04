@@ -39,8 +39,11 @@ import type {
   List,
   MarginMode,
   Meta,
+  AddStacksRequest,
   OpenMultiviewRequest,
   OpenStackRequest,
+  OpenTabRequest,
+  TabItemRequest,
   OpenTarget,
   Orderbook,
   OrderbookSettings,
@@ -277,6 +280,37 @@ export interface OpenStackOptions {
   windowId?: number;
   /** `false` opens the tab in the background; a new window always takes focus. */
   activate?: boolean;
+}
+
+/** One column of {@link Terminal.openTab} and {@link Terminal.addStacks}. */
+export interface TabItemOptions {
+  instrument: InstrumentAddress;
+  /** Chosen by the general rule when omitted. */
+  connectionId?: number;
+  /** A chart of the same instrument over the stack. */
+  chart?: boolean;
+}
+
+/** Options of {@link Terminal.openTab}. */
+export interface OpenTabOptions {
+  /** Columns in order, one to fifty; a bare address is a stack without a chart. */
+  items: Array<TabItemOptions | InstrumentAddress>;
+  /** Up to 64 characters; omitted, the terminal names the tab after the instruments. */
+  name?: string;
+  /** `new_tab` (default) or `new_window`. */
+  target?: OpenTarget;
+  /** The window for a new tab; the focused window when omitted. */
+  windowId?: number;
+  /** `false` opens the tab in the background; a new window always takes focus. */
+  activate?: boolean;
+}
+
+/** Options of {@link Terminal.addStacks}. */
+export interface AddStacksOptions {
+  windowId: number;
+  tabId: number;
+  /** Columns in order, one to fifty; a bare address is a stack without a chart. */
+  items: Array<TabItemOptions | InstrumentAddress>;
 }
 
 /** Options of {@link Terminal.openMultiview}. */
@@ -725,6 +759,34 @@ export class Terminal {
   }
 
   /**
+   * `POST /v1/workspace/tabs` (`workspace:write`): a tab with a column per
+   * item — a stack and, with `chart`, a chart over it — in a new tab or a new
+   * window. Omitted, `name` is the only instrument or the first one plus a
+   * count. A refusal names the item (`items[1]: …`) and nothing reaches the
+   * window.
+   */
+  openTab(options: OpenTabOptions): Promise<WorkspaceOutcome> {
+    const body: OpenTabRequest = {
+      items: tabItems(options.items),
+      name: options.name,
+      target: options.target,
+      window_id: options.windowId,
+      activate: options.activate,
+    };
+    return this.#request<WorkspaceOutcome>("POST", "workspace/tabs", { body });
+  }
+
+  /**
+   * `POST /v1/workspace/windows/{id}/tabs/{tab}/stacks` (`workspace:write`):
+   * the same columns after the tab's last one; the tab keeps its name and its
+   * column widths. The answer lists only the added widgets.
+   */
+  addStacks(options: AddStacksOptions): Promise<WorkspaceOutcome> {
+    const body: AddStacksRequest = { items: tabItems(options.items) };
+    return this.#request<WorkspaceOutcome>("POST", `${tabPath(options)}/stacks`, { body });
+  }
+
+  /**
    * `POST /v1/workspace/multiview` (`workspace:write`): a coin on every venue
    * of «Exchange layout», the same plan as the window's Multiview button. No
    * cell for the coin is `not_found`.
@@ -949,4 +1011,14 @@ function describeFailure(cause: unknown): string {
     return `${cause.message} (${inner.message})`;
   }
   return cause.message;
+}
+
+/** Columns of `openTab` / `addStacks` on the wire; a bare address is a stack without a chart. */
+function tabItems(items: Array<TabItemOptions | InstrumentAddress>): TabItemRequest[] {
+  if (items.length === 0) throw new RangeError("items must not be empty");
+  return items.map((item) =>
+    typeof item === "string"
+      ? { instrument: item }
+      : { instrument: item.instrument, connection_id: item.connectionId, chart: item.chart },
+  );
 }

@@ -186,6 +186,15 @@ async function routeWorkspace(method: string, url: URL, body: unknown): Promise<
     return reply({});
   }
   if (method === "POST" && parts.length === 1 && parts[0] === "multiview") return reply({});
+  const addsColumns = parts.length === 1 && parts[0] === "tabs";
+  const addsToTab = parts.length === 5 && parts[0] === "windows" && parts[1] === "1" && parts[2] === "tabs" && parts[3] === "1" && parts[4] === "stacks";
+  if (method === "POST" && (addsColumns || addsToTab)) {
+    const items = typeof body === "object" && body !== null && "items" in body && Array.isArray(body.items) ? body.items : [];
+    if (items.length === 0) return envelope(400, "invalid_request", "items must not be empty");
+    const bad = items.findIndex((item: unknown) => typeof item === "object" && item !== null && "instrument" in item && item.instrument === "binance:futures:NOPE");
+    if (bad >= 0) return envelope(400, "invalid_request", `items[${bad}]: unknown instrument`);
+    return reply({ stacks: [20, 22], charts: [21] });
+  }
   if (parts[0] === "stacks" && parts.length === 2) {
     if (parts[1] !== "12") return envelope(404, "not_found", "no stack with this widget_id");
     if (method === "PATCH" || method === "DELETE") return reply({ stacks: [12], charts: [] });
@@ -743,6 +752,43 @@ test("openStack and openMultiview post their bodies; refusals keep their codes",
   const refused = await t.openStack({ instrument: "binance:futures:NOPE" }).catch((e: unknown) => e);
   assert.ok(refused instanceof ApiError);
   assert.equal(refused.code, "invalid_request");
+});
+
+test("openTab and addStacks post their columns; a refusal names the item", async () => {
+  const t = terminal();
+  const outcome = await t.openTab({
+    items: [{ instrument: INSTRUMENT, chart: true }, { instrument: "binance:futures:ETHUSDT", connectionId: 12 }],
+    name: "Majors",
+    windowId: 1,
+    activate: false,
+  });
+  assert.equal(last().method, "POST");
+  assert.equal(last().url.pathname, "/v1/workspace/tabs");
+  assert.deepEqual(last().body, {
+    items: [{ instrument: INSTRUMENT, chart: true }, { instrument: "binance:futures:ETHUSDT", connection_id: 12 }],
+    name: "Majors",
+    window_id: 1,
+    activate: false,
+  });
+  assert.deepEqual([outcome.stacks, outcome.charts], [[20, 22], [21]]);
+
+  // Bare addresses are stacks without charts.
+  await t.openTab({ items: [INSTRUMENT, "binance:futures:ETHUSDT"], target: "new_window" });
+  assert.deepEqual(last().body, {
+    items: [{ instrument: INSTRUMENT }, { instrument: "binance:futures:ETHUSDT" }],
+    target: "new_window",
+  });
+
+  const added = await t.addStacks({ windowId: 1, tabId: 1, items: [{ instrument: "binance:futures:SOLUSDT", chart: true }] });
+  assert.equal(last().url.pathname, "/v1/workspace/windows/1/tabs/1/stacks");
+  assert.deepEqual(last().body, { items: [{ instrument: "binance:futures:SOLUSDT", chart: true }] });
+  assert.deepEqual(added.stacks, [20, 22]);
+
+  assert.throws(() => t.openTab({ items: [] }), RangeError);
+  const refused = await t.openTab({ items: [INSTRUMENT, "binance:futures:NOPE"] }).catch((e: unknown) => e);
+  assert.ok(refused instanceof ApiError);
+  assert.equal(refused.code, "invalid_request");
+  assert.match(refused.message, /items\[1\]/);
 });
 
 test("stack, tab and window commands use their routes", async () => {

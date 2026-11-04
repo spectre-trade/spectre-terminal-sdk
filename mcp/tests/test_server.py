@@ -37,6 +37,8 @@ EXPECTED_TOOLS = {
     "set_margin_mode",
     "workspace",
     "open_stack",
+    "open_tab",
+    "add_stacks",
     "open_multiview",
     "set_stack_instrument",
     "close_stack",
@@ -60,6 +62,8 @@ TRADING_TOOLS = {
     "set_leverage",
     "set_margin_mode",
     "open_stack",
+    "open_tab",
+    "add_stacks",
     "open_multiview",
     "set_stack_instrument",
     "close_stack",
@@ -493,6 +497,43 @@ async def test_workspace_tools(provider: TerminalProvider, fake_api: FakeApi) ->
         "target": "new_tab",
         "activate": False,
     }
+
+    opened = _structured(
+        await server.call_tool(
+            "open_tab",
+            {
+                "items": [
+                    {"instrument": "binance:futures:BTCUSDT", "chart": True},
+                    {"instrument": "binance:futures:ETHUSDT", "connection_id": 12},
+                ],
+                "name": "Majors",
+                "activate": False,
+            },
+        )
+    )
+    assert opened["window_id"] == 1
+    method, path, body = fake_api.bodies[-1]
+    assert (method, path) == ("POST", "/v1/workspace/tabs")
+    assert body == {
+        "items": [
+            {"instrument": "binance:futures:BTCUSDT", "chart": True},
+            {"instrument": "binance:futures:ETHUSDT", "chart": False, "connection_id": 12},
+        ],
+        "target": "new_tab",
+        "activate": False,
+        "name": "Majors",
+    }
+    _structured(
+        await server.call_tool(
+            "add_stacks",
+            {"window_id": 1, "tab_id": 2, "items": [{"instrument": "binance:futures:SOLUSDT"}]},
+        )
+    )
+    method, path, body = fake_api.bodies[-1]
+    assert (method, path) == ("POST", "/v1/workspace/windows/1/tabs/2/stacks")
+    assert body == {"items": [{"instrument": "binance:futures:SOLUSDT", "chart": False}]}
+    with pytest.raises(ToolError):
+        await server.call_tool("open_tab", {"items": []})
 
     _structured(await server.call_tool("open_multiview", {"base": "BTC", "target": "new_window"}))
     method, path, body = fake_api.bodies[-1]

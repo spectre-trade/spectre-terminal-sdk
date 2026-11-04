@@ -89,6 +89,8 @@ the commands are annotated as destructive like trading:
 | --- | --- | --- |
 | `workspace` | — | every window with its tabs, stacks and charts, and the ids the commands take; ids change with every run of the terminal |
 | `open_stack` | `instrument`, optional `connection_id`, `chart`, `target` (`new_tab`, `new_window`), `window_id`, `activate` | a stack in a new tab or window, with a chart if asked; answers the new ids |
+| `open_tab` | `items` (each `instrument`, optional `connection_id`, `chart`), optional `name`, `target`, `window_id`, `activate` | one tab with several instruments, a column each, in a new tab or window |
+| `add_stacks` | `window_id`, `tab_id`, `items` | the same columns added after the last column of an existing tab |
 | `open_multiview` | `base`, optional `target`, `window_id`, `activate` | a coin on every venue of «Exchange layout», as the Multiview button |
 | `set_stack_instrument` | `widget_id`, `instrument`, optional `connection_id` | another instrument in the stack and the charts that follow it |
 | `close_stack` | `widget_id` | closes one stack |

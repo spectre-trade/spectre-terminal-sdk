@@ -16,6 +16,7 @@
 export { Terminal, SUPPORTED_API_VERSION } from "./client.ts";
 export type {
   AccountFillsOptions,
+  AddStacksOptions,
   AmendTriggerOptions,
   CancelOrderOptions,
   CancelTriggerOptions,
@@ -26,6 +27,7 @@ export type {
   InstrumentsOptions,
   OpenMultiviewOptions,
   OpenStackOptions,
+  OpenTabOptions,
   OrderbookOptions,
   PlaceOrderOptions,
   PlaceTriggerOptions,
@@ -33,6 +35,7 @@ export type {
   SetMarginModeOptions,
   SettingsOptions,
   StackInstrumentOptions,
+  TabItemOptions,
   StackOptions,
   StreamOptions,
   TabOptions,

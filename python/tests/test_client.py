@@ -18,6 +18,7 @@ from spectre_terminal import (
     Position,
     SettingChange,
     SpectreTerminalError,
+    TabItem,
     Terminal,
     TerminalUnreachable,
     TokenMissing,
@@ -651,6 +652,58 @@ def test_open_stack_and_multiview_send_their_bodies(fake_terminal: FakeTerminal)
     with pytest.raises(ApiError) as error:
         terminal.open_stack("binance:futures:NOPE")
     assert error.value.code == "invalid_request"
+
+
+def test_open_tab_and_add_stacks_send_their_columns(fake_terminal: FakeTerminal) -> None:
+    terminal = client(fake_terminal)
+    outcome = terminal.open_tab(
+        [TabItem(INSTRUMENT, chart=True), TabItem("binance:futures:ETHUSDT", connection_id=12)],
+        name="Majors",
+        window_id=1,
+        activate=False,
+    )
+    request = fake_terminal.last
+    assert request.method == "POST" and request.path == "/v1/workspace/tabs"
+    assert request.body == {
+        "items": [
+            {"instrument": INSTRUMENT, "chart": True},
+            {"instrument": "binance:futures:ETHUSDT", "chart": False, "connection_id": 12},
+        ],
+        "target": "new_tab",
+        "activate": False,
+        "name": "Majors",
+        "window_id": 1,
+    }
+    assert (outcome.stacks, outcome.charts) == ([20, 22], [21])
+
+    # Bare addresses are stacks without charts; the defaults are not sent.
+    terminal.open_tab([INSTRUMENT, "binance:futures:ETHUSDT"], target="new_window")
+    assert fake_terminal.last.body == {
+        "items": [
+            {"instrument": INSTRUMENT, "chart": False},
+            {"instrument": "binance:futures:ETHUSDT", "chart": False},
+        ],
+        "target": "new_window",
+        "activate": True,
+    }
+
+    added = terminal.add_stacks(1, 1, [TabItem("binance:futures:SOLUSDT", chart=True)])
+    request = fake_terminal.last
+    assert request.method == "POST"
+    assert request.path == "/v1/workspace/windows/1/tabs/1/stacks"
+    assert request.body == {"items": [{"instrument": "binance:futures:SOLUSDT", "chart": True}]}
+    assert added.stacks == [20, 22]
+
+    with pytest.raises(ValueError):
+        terminal.open_tab([])
+    with pytest.raises(ValueError):
+        terminal.open_tab(INSTRUMENT)  # type: ignore[arg-type]
+    with pytest.raises(ValueError):
+        terminal.open_tab([INSTRUMENT], target="somewhere")
+    with pytest.raises(ApiError) as error:
+        terminal.open_tab([INSTRUMENT, "binance:futures:NOPE"])
+    assert error.value.code == "invalid_request"
+    assert "items[1]" in error.value.message
 
 
 def test_stack_tab_and_window_commands_use_their_routes(fake_terminal: FakeTerminal) -> None:

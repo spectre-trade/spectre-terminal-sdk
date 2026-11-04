@@ -15,7 +15,7 @@ from typing import Annotated, Any
 from mcp.server.mcpserver import MCPServer
 from mcp.types import ToolAnnotations
 from pydantic import Field
-from spectre_terminal.models import Window, Workspace, WorkspaceOutcome
+from spectre_terminal.models import TabItem, Window, Workspace, WorkspaceOutcome
 
 from ..terminal import TerminalProvider
 
@@ -41,6 +41,12 @@ _WIDGET = Field(description="Stack widget_id from the workspace tool")
 _TARGET = Field(
     default="new_tab",
     description="new_tab (in window_id, or the focused window) or new_window",
+)
+_ITEMS = Field(
+    description=(
+        "Columns in order; each has instrument (exchange:market:symbol) and optionally "
+        "connection_id and chart (true opens a chart over the stack)"
+    )
 )
 _ACTIVATE = Field(
     default=True,
@@ -108,6 +114,18 @@ def outcome_dict(outcome: WorkspaceOutcome) -> dict[str, Any]:
     }
 
 
+def _tab_items(items: list[dict[str, Any]]) -> list[TabItem]:
+    """Tool arguments → client columns; the client checks the list is not empty."""
+    return [
+        TabItem(
+            instrument=str(item.get("instrument", "")),
+            connection_id=item.get("connection_id"),
+            chart=bool(item.get("chart", False)),
+        )
+        for item in items
+    ]
+
+
 def register(server: MCPServer, provider: TerminalProvider) -> None:
     @server.tool(name="workspace", annotations=READ_ONLY)
     def workspace() -> dict[str, Any]:
@@ -149,6 +167,55 @@ def register(server: MCPServer, provider: TerminalProvider) -> None:
                 window_id=window_id,
                 activate=activate,
             )
+        return outcome_dict(outcome)
+
+    @server.tool(name="open_tab", annotations=WORKSPACE_WRITE)
+    def open_tab(
+        items: Annotated[list[dict[str, Any]], _ITEMS],
+        name: Annotated[
+            str | None,
+            Field(
+                default=None,
+                description="Tab name, up to 64 characters; None names it after the instruments",
+            ),
+        ] = None,
+        target: Annotated[str, _TARGET] = "new_tab",
+        window_id: Annotated[
+            int | None, Field(default=None, description="Window for the new tab")
+        ] = None,
+        activate: Annotated[bool, _ACTIVATE] = True,
+    ) -> dict[str, Any]:
+        """Open one tab with several instruments: a column per item, in a new tab or window.
+
+        Each item is a stack and, with ``chart``, a chart over it. One to
+        fifty items. Answers the window, the new tab and the new widget ids
+        in column order. A refusal names the item (``items[1]: …``) and
+        nothing is opened.
+        """
+        with provider.call() as terminal:
+            outcome = terminal.open_tab(
+                _tab_items(items),
+                name=name,
+                target=target,
+                window_id=window_id,
+                activate=activate,
+            )
+        return outcome_dict(outcome)
+
+    @server.tool(name="add_stacks", annotations=WORKSPACE_WRITE)
+    def add_stacks(
+        window_id: Annotated[int, _WINDOW],
+        tab_id: Annotated[int, _TAB],
+        items: Annotated[list[dict[str, Any]], _ITEMS],
+    ) -> dict[str, Any]:
+        """Add instruments to an existing tab: a column per item after the tab's last column.
+
+        The tab keeps its name and its column widths. Answers only the
+        added stack and chart widget ids. No such window or tab is
+        ``not_found``.
+        """
+        with provider.call() as terminal:
+            outcome = terminal.add_stacks(window_id, tab_id, _tab_items(items))
         return outcome_dict(outcome)
 
     @server.tool(name="open_multiview", annotations=WORKSPACE_WRITE)

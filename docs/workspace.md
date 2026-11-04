@@ -78,6 +78,8 @@ For a close or an activation the touched ids are filled in and the rest is
 | Call | Does | Refuses with |
 | --- | --- | --- |
 | `open_stack` / `openStack` | a stack of the instrument, with a chart if asked, in a new tab (`target: "new_tab"`, in `window_id` or the focused window) or a new window; `activate: false` keeps the current tab selected | `invalid_request` for an instrument the catalogue does not know |
+| `open_tab` / `openTab` | a tab with a column per item of `items` — a stack and, with `chart`, a chart over it — in a new tab or window; one to fifty items; `name` optional, up to 64 characters | `invalid_request` naming the item (`items[1]: …`); nothing is opened |
+| `add_stacks` / `addStacks` | the same columns after the last column of an existing tab (`window_id`, `tab_id`); the tab keeps its name and widths; answers only the added widgets | `not_found` for the window or tab |
 | `open_multiview` / `openMultiview` | the coin on every venue of «Exchange layout», as the Multiview button; `target` left out follows the terminal setting | `not_found` when no enabled row lists the coin |
 | `set_stack_instrument` / `setStackInstrument` | another instrument in the stack and the charts that follow it | `not_found`; `invalid_request` for a chart id |
 | `close_stack` / `closeStack` | closes one stack | `not_found`; `invalid_request` for a chart id |
@@ -96,4 +98,4 @@ within 2 s, the answer is `unavailable` and the command is not retried.
 
 Empty windows, the screener, finres and orders windows, moving stacks
 between tabs and column widths: the layout reports them, the API does not
-change them.
+change them. Columns are added only after a tab's last one.

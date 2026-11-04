@@ -731,6 +731,43 @@ charts» the chart still opens on top. The answer is the window's outcome:
 widgets of the new tab in column order. Every command below answers in the
 same shape: the touched ids filled in, the rest `null` or empty.
 
+### `POST /v1/workspace/tabs` — a tab from a list of instruments
+
+```json
+{ "items": [
+    { "instrument": "binance:futures:BTCUSDT", "chart": true },
+    { "instrument": "bybit:futures:ETHUSDT", "connection_id": 31 }
+  ],
+  "name": "Majors", "target": "new_tab", "window_id": 1, "activate": true }
+```
+
+Each element of `items` is a column of the tab, in list order: a stack of
+the instrument and, with `chart`, a chart over it; the fields of an
+element are those of `POST /v1/workspace/stacks`. One to 50 elements,
+otherwise `400 invalid_request`; a refusal by element names it
+(`items[1]: unknown instrument …`), and nothing reaches the window then.
+`name` is the tab name, up to 64 characters; omitted, it is the symbol of
+the only instrument or the first symbol plus the count of the rest
+(`BTCUSDT +1`). `target`, `window_id` and `activate` are as for a stack.
+The columns share the window width evenly, like stacks opened by hand;
+the chart side and share come from the Multiview settings. The answer is
+as for a stack: `stacks` and `charts` are the widgets of the new tab in
+column order.
+
+### `POST /v1/workspace/windows/{id}/tabs/{tab}/stacks` — columns into an existing tab
+
+```json
+{ "items": [ { "instrument": "binance:futures:SOLUSDT", "chart": true } ] }
+```
+
+The same `items` as for a tab, with the same limits and refusals; the
+columns go after the last column of tab `tab` of window `id`, the tab is
+not renamed and its column widths do not change. No such window or tab —
+`404 not_found`. A tab not selected in its window is made active for the
+duration of the command and restored, as when a stack's instrument
+changes. The answer is the window's outcome: `window_id` and `tab_id` of
+the tab, `stacks` and `charts` — only the added widgets, in column order.
+
 ### `POST /v1/workspace/multiview` — a coin on every venue
 
 ```json
@@ -980,7 +1017,8 @@ Printed in `/v1/meta`; a refusal is `error rate_limited` on the request or a
   catalogue. Of the layout, it does not open empty
   windows, nor the screener, finres and orders windows, does not move
   stacks between tabs and does not change column widths — those are read
-  only. Of trading, there is no grid move by dragging (`MoveOrderGrid`) and
+  only; columns are added only after a tab's last one. Of trading, there
+  is no grid move by dragging (`MoveOrderGrid`) and
   no trading on MOEX.
 - It does not vouch for the outcome at the exchange: `accepted` is accepted
   by the terminal, the outcome is read from the account.

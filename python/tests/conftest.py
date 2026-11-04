@@ -279,6 +279,20 @@ class FakeTerminal:
             return 200, outcome, {}
         if method == "POST" and parts == ["multiview"]:
             return 200, outcome, {}
+        if method == "POST" and (
+            parts == ["tabs"] or parts == ["windows", str(WINDOW_ID), "tabs", "1", "stacks"]
+        ):
+            items = body_in.get("items") if isinstance(body_in, dict) else None
+            if not items:
+                return 400, error_body("invalid_request", "items must not be empty"), {}
+            for index, item in enumerate(items):
+                if item.get("instrument") == "binance:futures:NOPE":
+                    return (
+                        400,
+                        error_body("invalid_request", f"items[{index}]: unknown instrument"),
+                        {},
+                    )
+            return 200, {**outcome, "stacks": [20, 22], "charts": [21]}, {}
         if parts[:1] == ["stacks"] and len(parts) == 2:
             if parts[1] != "12":
                 return 404, error_body("not_found", "no stack with this widget_id"), {}

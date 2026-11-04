@@ -49,6 +49,7 @@ from .models import (
     Settings,
     SettingsApplied,
     Snapshot,
+    TabItem,
     Trades,
     Window,
     Workspace,
@@ -707,6 +708,55 @@ class Terminal:
             body["window_id"] = int(window_id)
         return WorkspaceOutcome.from_dict(self._send("POST", "/workspace/stacks", body))
 
+    def open_tab(
+        self,
+        items: Sequence[TabItem | str],
+        *,
+        name: str | None = None,
+        target: str = "new_tab",
+        window_id: int | None = None,
+        activate: bool = True,
+    ) -> WorkspaceOutcome:
+        """``POST /v1/workspace/tabs`` (``workspace:write``): a tab with a column per instrument.
+
+        Each item of ``items`` — a :class:`TabItem` or a bare instrument
+        address — becomes a column in list order: a stack and, with
+        ``chart``, a chart over it. One to fifty items. ``name`` is the tab
+        name (up to 64 characters); without it the terminal names the tab
+        after the only instrument or the first one plus a count
+        (``BTCUSDT +1``). ``target``, ``window_id`` and ``activate`` are as
+        in :meth:`open_stack`. A refusal names the item (``items[1]: …``)
+        and nothing reaches the window.
+        """
+        if target not in ("new_tab", "new_window"):
+            raise ValueError("target must be new_tab or new_window")
+        body: dict[str, Any] = {
+            "items": _tab_items(items),
+            "target": target,
+            "activate": bool(activate),
+        }
+        if name is not None:
+            body["name"] = name
+        if window_id is not None:
+            body["window_id"] = int(window_id)
+        return WorkspaceOutcome.from_dict(self._send("POST", "/workspace/tabs", body))
+
+    def add_stacks(
+        self, window_id: int, tab_id: int, items: Sequence[TabItem | str]
+    ) -> WorkspaceOutcome:
+        """``POST /v1/workspace/windows/{id}/tabs/{tab}/stacks``: columns after the tab's last one.
+
+        The same ``items`` as :meth:`open_tab`; the tab keeps its name and
+        its column widths. No such window or tab is ``not_found``. The
+        answer lists only the added ``stacks`` and ``charts``.
+        """
+        body = {"items": _tab_items(items)}
+        return WorkspaceOutcome.from_dict(
+            self._send(
+                "POST", f"/workspace/windows/{int(window_id)}/tabs/{int(tab_id)}/stacks", body
+            )
+        )
+
     def open_multiview(
         self,
         base: str,
@@ -889,3 +939,16 @@ class Terminal:
             f"cannot reach Spectre Terminal at {self._host}:{self._port}: {cause} "
             "(is the terminal running with the Local API switched on?)"
         )
+
+
+def _tab_items(items: Sequence[TabItem | str]) -> list[dict[str, Any]]:
+    """Columns of ``open_tab`` / ``add_stacks`` on the wire.
+
+    A bare instrument address is a stack without a chart.
+    """
+    if isinstance(items, str) or not items:
+        raise ValueError("items must be a non-empty sequence of TabItem or instrument addresses")
+    return [
+        (item if isinstance(item, TabItem) else TabItem(instrument=str(item))).to_dict()
+        for item in items
+    ]

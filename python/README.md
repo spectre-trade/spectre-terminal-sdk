@@ -63,7 +63,8 @@ Every operation of the contract is a method of `Terminal`: `meta`, `health`,
 `place_order`, `cancel_order`, `cancel_all`, `close_position`, `place_trigger`,
 `cancel_trigger`, `cancel_all_triggers`, `amend_trigger`, `leverage`,
 `set_leverage`, `set_margin_mode`, `workspace`, `workspace_window`,
-`open_stack`, `open_multiview`, `set_stack_instrument`, `close_stack`,
+`open_stack`, `open_tab`, `add_stacks`, `open_multiview`,
+`set_stack_instrument`, `close_stack`,
 `close_tab`, `activate_tab`, `close_window`, `activate_window`, `settings`,
 `orderbook_settings`, `update_settings`, `stream`.
 Errors derive from `SpectreTerminalError`; the terminal's own refusals are
@@ -174,6 +175,9 @@ the `workspace` stream topic sends the whole layout on every change.
 opened = terminal.open_stack("binance:futures:BTCUSDT", chart=True, activate=False)
 terminal.set_stack_instrument(opened.stacks[0], "binance:futures:ETHUSDT")
 terminal.close_tab(opened.window_id, opened.tab_id)
+
+majors = terminal.open_tab([TabItem("binance:futures:BTCUSDT", chart=True), "binance:futures:ETHUSDT"], name="Majors")
+terminal.add_stacks(majors.window_id, majors.tab_id, ["binance:futures:SOLUSDT"])
 ```
 
 Settings are read as stored (`settings()`), resolved the way a stack sees
