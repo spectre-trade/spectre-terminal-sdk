@@ -55,6 +55,13 @@ __all__ = [
     "Trades",
     "TriggerOrder",
     "Unsubscribed",
+    "CellPosition",
+    "Chart",
+    "Stack",
+    "Tab",
+    "Window",
+    "Workspace",
+    "WorkspaceOutcome",
 ]
 
 T = TypeVar("T")
@@ -106,9 +113,10 @@ def _levels(pairs: Sequence[Sequence[Any]] | None) -> list[Level]:
 class Limits:
     """Ceilings of the stream and of trading, as printed by ``/v1/meta``.
 
-    ``commands_per_second`` is the trading-command rate per listener; it is
-    ``0`` for a terminal older than the writing stage, which prints no such
-    limit because it accepts no commands.
+    ``commands_per_second`` is the trading-command rate per listener,
+    ``workspace_commands_per_second`` the workspace-command rate; each is
+    ``0`` for a terminal older than the stage that added the limit, which
+    prints none because it accepts no such commands.
     """
 
     ws_connections_per_token: int
@@ -116,6 +124,7 @@ class Limits:
     api_only_instruments: int
     exchange_subscriptions_per_second: int
     commands_per_second: int = 0
+    workspace_commands_per_second: int = 0
 
     @classmethod
     def from_dict(cls, d: Mapping[str, Any]) -> Limits:
@@ -125,6 +134,7 @@ class Limits:
             api_only_instruments=int(d["api_only_instruments"]),
             exchange_subscriptions_per_second=int(d["exchange_subscriptions_per_second"]),
             commands_per_second=int(d.get("commands_per_second") or 0),
+            workspace_commands_per_second=int(d.get("workspace_commands_per_second") or 0),
         )
 
 
@@ -939,6 +949,201 @@ class Leverage:
         )
 
 
+# --- workspace -------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class CellPosition:
+    """A cell of a tab's grid: column left to right, row top to bottom, cell within the row."""
+
+    column: int
+    row: int
+    cell: int
+
+    @classmethod
+    def from_dict(cls, d: Mapping[str, Any]) -> CellPosition:
+        return cls(column=int(d["column"]), row=int(d["row"]), cell=int(d["cell"]))
+
+
+def _optional_position(value: Mapping[str, Any] | None) -> CellPosition | None:
+    return None if value is None else CellPosition.from_dict(value)
+
+
+@dataclass(frozen=True)
+class Stack:
+    """A stack — order book with its trade tape and clusters — inside a tab.
+
+    ``widget_id`` is global for this run of the terminal. ``instrument`` and
+    ``connection_id`` are ``None`` while the stack is ``empty``; ``position``
+    is ``None`` for a stack hidden inside a stack group.
+    """
+
+    widget_id: int
+    instrument: str | None
+    connection_id: int | None
+    empty: bool
+    frozen: bool
+    position: CellPosition | None
+
+    @classmethod
+    def from_dict(cls, d: Mapping[str, Any]) -> Stack:
+        return cls(
+            widget_id=int(d["widget_id"]),
+            instrument=_optional_str(d.get("instrument")),
+            connection_id=_optional_int(d.get("connection_id")),
+            empty=bool(d["empty"]),
+            frozen=bool(d["frozen"]),
+            position=_optional_position(d.get("position")),
+        )
+
+
+@dataclass(frozen=True)
+class Chart:
+    """A chart inside a tab.
+
+    ``owner_widget_id`` is the stack the chart follows, ``None`` when standalone.
+    """
+
+    widget_id: int
+    instrument: str | None
+    connection_id: int | None
+    interval: str
+    owner_widget_id: int | None
+    position: CellPosition | None
+
+    @classmethod
+    def from_dict(cls, d: Mapping[str, Any]) -> Chart:
+        return cls(
+            widget_id=int(d["widget_id"]),
+            instrument=_optional_str(d.get("instrument")),
+            connection_id=_optional_int(d.get("connection_id")),
+            interval=str(d["interval"]),
+            owner_widget_id=_optional_int(d.get("owner_widget_id")),
+            position=_optional_position(d.get("position")),
+        )
+
+
+@dataclass(frozen=True)
+class Tab:
+    """A tab of a window: ``id`` is numbered per window from 1, exactly one tab is ``active``."""
+
+    id: int
+    name: str
+    active: bool
+    stacks: list[Stack]
+    charts: list[Chart]
+
+    @classmethod
+    def from_dict(cls, d: Mapping[str, Any]) -> Tab:
+        return cls(
+            id=int(d["id"]),
+            name=str(d["name"]),
+            active=bool(d["active"]),
+            stacks=[Stack.from_dict(item) for item in d.get("stacks") or ()],
+            charts=[Chart.from_dict(item) for item in d.get("charts") or ()],
+        )
+
+
+@dataclass(frozen=True)
+class Window:
+    """A terminal window; ``main`` cannot be closed through the API.
+
+    ``chart_window`` is a torn-off chart window. The geometry is in logical
+    screen pixels; ``monitor`` is the OS's monitor name or ``None``.
+    """
+
+    id: int
+    main: bool
+    chart_window: bool
+    focused: bool
+    x: int
+    y: int
+    width: int
+    height: int
+    maximized: bool
+    monitor: str | None
+    tabs: list[Tab]
+
+    @property
+    def active_tab(self) -> Tab | None:
+        return next((tab for tab in self.tabs if tab.active), None)
+
+    def tab(self, tab_id: int) -> Tab | None:
+        return next((tab for tab in self.tabs if tab.id == tab_id), None)
+
+    @classmethod
+    def from_dict(cls, d: Mapping[str, Any]) -> Window:
+        geometry = d["geometry"]
+        return cls(
+            id=int(d["id"]),
+            main=bool(d["main"]),
+            chart_window=bool(d["chart_window"]),
+            focused=bool(d["focused"]),
+            x=int(geometry["x"]),
+            y=int(geometry["y"]),
+            width=int(geometry["width"]),
+            height=int(geometry["height"]),
+            maximized=bool(geometry["maximized"]),
+            monitor=_optional_str(d.get("monitor")),
+            tabs=[Tab.from_dict(item) for item in d.get("tabs") or ()],
+        )
+
+
+@dataclass(frozen=True)
+class Workspace:
+    """``GET /v1/workspace`` and the ``workspace`` stream topic: every window, by ascending id.
+
+    The ids are internal numbers of this run of the terminal: do not keep
+    them across restarts, read them again.
+    """
+
+    windows: list[Window]
+
+    @property
+    def main(self) -> Window | None:
+        return next((window for window in self.windows if window.main), None)
+
+    def window(self, window_id: int) -> Window | None:
+        return next((window for window in self.windows if window.id == window_id), None)
+
+    def stack(self, widget_id: int) -> Stack | None:
+        for window in self.windows:
+            for tab in window.tabs:
+                for stack in tab.stacks:
+                    if stack.widget_id == widget_id:
+                        return stack
+        return None
+
+    @classmethod
+    def from_dict(cls, d: Mapping[str, Any]) -> Workspace:
+        data = d.get("data", d)
+        return cls(windows=[Window.from_dict(item) for item in data.get("windows") or ()])
+
+
+@dataclass(frozen=True)
+class WorkspaceOutcome:
+    """What the window did for a workspace command.
+
+    For an opening: the window, the new tab and its ``stacks`` and
+    ``charts`` in column order. For closing and activating: the touched
+    ids, the rest ``None`` or empty.
+    """
+
+    window_id: int | None
+    tab_id: int | None
+    stacks: list[int]
+    charts: list[int]
+
+    @classmethod
+    def from_dict(cls, d: Mapping[str, Any]) -> WorkspaceOutcome:
+        return cls(
+            window_id=_optional_int(d.get("window_id")),
+            tab_id=_optional_int(d.get("tab_id")),
+            stacks=[int(item) for item in d.get("stacks") or ()],
+            charts=[int(item) for item in d.get("charts") or ()],
+        )
+
+
 # --- account stream payloads ----------------------------------------------------
 
 
@@ -983,17 +1188,22 @@ def topic_of(sub: str) -> str:
 
     Market subscriptions are ``"{stream}:{topic}"``, account ones
     ``"{connection}:account.<topic>"``: ``"12:account.fills"`` -> ``"account.fills"``.
+    The ``workspace`` subscription has no stream or connection: its id is the
+    topic itself.
     """
-    _, _, topic = sub.partition(":")
-    return topic
+    head, sep, topic = sub.partition(":")
+    return topic if sep else head
 
 
 @dataclass(frozen=True)
 class Subscribed:
-    """Reply to ``subscribe``: the subscription id and the connection chosen for it."""
+    """Reply to ``subscribe``: the subscription id and the connection chosen for it.
+
+    ``connection_id`` is ``None`` for ``workspace``: the layout has no connection.
+    """
 
     sub: str
-    connection_id: int
+    connection_id: int | None
     request_id: str | None = None
 
     @property
@@ -1005,7 +1215,7 @@ class Subscribed:
     def from_dict(cls, d: Mapping[str, Any]) -> Subscribed:
         return cls(
             sub=str(d["sub"]),
-            connection_id=int(d["connection_id"]),
+            connection_id=_optional_int(d.get("connection_id")),
             request_id=_optional_str(d.get("request_id")),
         )
 
@@ -1030,8 +1240,9 @@ def parse_event_data(topic: str, data: Any) -> Any:
     ``clusters`` -> :class:`Cluster`, ``account.orders`` ->
     :class:`OrdersUpdate`, ``account.positions`` -> :class:`PositionUpdate`,
     ``account.balances`` -> :class:`Balance`, ``account.fills`` ->
-    :class:`Fill`. A topic this client does not know is passed through as
-    decoded JSON, so a newer terminal still streams.
+    :class:`Fill`, ``workspace`` -> :class:`Workspace`. A topic this client
+    does not know is passed through as decoded JSON, so a newer terminal
+    still streams.
     """
     if topic == "trades":
         return [Trade.from_dict(item) for item in data or ()]
@@ -1051,6 +1262,8 @@ def parse_event_data(topic: str, data: Any) -> Any:
         return Balance.from_dict(data)
     if topic == "account.fills":
         return Fill.from_dict(data)
+    if topic == "workspace":
+        return Workspace.from_dict(data)
     return data
 
 

@@ -8,14 +8,19 @@
     "market:read",
     "connections:read",
     "account:read",
-    "trading:write"
+    "trading:write",
+    "workspace:read",
+    "workspace:write",
+    "settings:read",
+    "settings:write"
   ],
   "limits": {
     "ws_connections_per_token": 8,
     "subscriptions_per_connection": 100,
     "api_only_instruments": 50,
     "exchange_subscriptions_per_second": 5,
-    "commands_per_second": 10
+    "commands_per_second": 10,
+    "workspace_commands_per_second": 5
   },
   "topics": []
 }

@@ -59,10 +59,14 @@ running; the first tool call then answers `terminal_unreachable`.
 | `place_trigger` | places a stop loss or take profit on the open position, or a stop; needs a `client_key` |
 | `cancel_trigger`, `amend_trigger`, `cancel_all_triggers` | cancel, move or clear trigger orders by their numeric id |
 | `set_leverage`, `set_margin_mode` | leverage (a number, or `max`/`smart`) and `cross`/`isolated` |
+| `workspace` | every window with its tabs, stacks and charts; the ids the commands below take |
+| `open_stack`, `open_multiview` | a stack (with a chart if asked) in a new tab or window; a coin on every venue of «Exchange layout» |
+| `set_stack_instrument`, `close_stack` | re-point or close one stack by `widget_id` |
+| `close_tab`, `activate_tab`, `close_window`, `activate_window` | tabs by window and tab id, windows by id; the main window and a window's only tab never close |
 
 Read tools are read-only and idempotent and say so in their annotations; the
-ten trading tools are annotated as destructive, so an MCP client may ask the
-user before each call. Trading answers mean "accepted by the terminal", not
+ten trading tools and the eight workspace commands are annotated as
+destructive, so an MCP client may ask the user before each call. Trading answers mean "accepted by the terminal", not
 "filled": the outcome is read from `open_orders` and `recent_fills`.
 Prices and sizes are decimal strings; times are UTC milliseconds plus an ISO
 twin. Errors start with a stable code (`unauthorized`, `not_found`,

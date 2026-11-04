@@ -30,6 +30,7 @@ from spectre_terminal import (
     TerminalUnreachable,
     Trade,
     Unsubscribed,
+    Workspace,
 )
 from spectre_terminal.stream import FrameRouter, Reply
 
@@ -73,7 +74,7 @@ class ScriptedServer:
         rid = request.get("request_id")
         if request["type"] == "unsubscribe":
             sub = request["sub"]
-            if sub == "7:trades" or sub.startswith("12:account."):
+            if sub == "7:trades" or sub == "workspace" or sub.startswith("12:account."):
                 return [{"type": "unsubscribed", "request_id": rid, "sub": sub}]
             return [
                 {
@@ -83,6 +84,26 @@ class ScriptedServer:
                     "code": "not_found",
                     "message": "no such subscription on this connection",
                 }
+            ]
+        if request["topic"] == "workspace":
+            if "instrument" in request or "connection_id" in request:
+                return [
+                    {
+                        "type": "error",
+                        "request_id": rid,
+                        "code": "invalid_request",
+                        "message": "workspace takes neither instrument nor connection_id",
+                    }
+                ]
+            return [
+                {"type": "subscribed", "request_id": rid, "sub": "workspace"},
+                {
+                    "type": "event",
+                    "sub": "workspace",
+                    "seq": 1,
+                    "ts": 1,
+                    "data": load_fixture("workspace")["data"],
+                },
             ]
         if request["topic"].startswith("account."):
             return ScriptedServer.account_replies(request)
@@ -447,3 +468,21 @@ def test_router_ignores_strays() -> None:
     request_id = router.open_request()
     router.close_request(request_id)
     assert router.route({"type": "subscribed", "request_id": request_id, "sub": "1:t"}) is None
+
+
+def test_subscribe_workspace_takes_no_instrument_and_gets_the_snapshot_first() -> None:
+    async def test(server: ScriptedServer, port: int) -> None:
+        async with stream_for(port) as stream:
+            subscribed = await stream.subscribe("workspace")
+            assert subscribed.sub == "workspace" and subscribed.connection_id is None
+            assert subscribed.topic == "workspace"
+            event = await stream.__anext__()
+            assert isinstance(event, Event) and isinstance(event.data, Workspace)
+            assert event.data.main is not None and event.data.main.tabs[0].name == "XRP"
+            done = await stream.unsubscribe(subscribed)
+            assert done.sub == "workspace"
+        request = server.requests[0]
+        assert request["topic"] == "workspace"
+        assert "instrument" not in request and "connection_id" not in request
+
+    run(test)

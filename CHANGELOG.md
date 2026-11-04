@@ -26,4 +26,11 @@ is a major bump and happens only with a new API version of the terminal.
   `set_margin_mode` in both clients, the `Leverage` model, and the MCP tools
   `leverage`, `place_trigger`, `cancel_trigger`, `amend_trigger`,
   `cancel_all_triggers`, `set_leverage`, `set_margin_mode`.
+- Workspace: `workspace`, `workspace_window`, `open_stack`, `open_multiview`,
+  `set_stack_instrument`, `close_stack`, `close_tab`, `activate_tab`,
+  `close_window`, `activate_window` in both clients, the `Workspace`,
+  `Window`, `Tab`, `Stack`, `Chart` and `WorkspaceOutcome` models, the
+  `workspace` stream topic, and the MCP tools `workspace`, `open_stack`,
+  `open_multiview`, `set_stack_instrument`, `close_stack`, `close_tab`,
+  `activate_tab`, `close_window`, `activate_window`.
 - The contract copy (`contract/`) pinned to a terminal revision.

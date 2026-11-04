@@ -49,6 +49,10 @@ def is_account_topic(topic: str) -> bool:
     return topic.startswith(ACCOUNT_TOPIC_PREFIX)
 
 
+WORKSPACE_TOPIC = "workspace"
+"""The layout topic: one per terminal, subscribed without instrument or connection."""
+
+
 CLOSE_RAISES = frozenset({1001, 1006, 4008, 4029})
 """Close codes that end iteration with :class:`~spectre_terminal.errors.StreamClosed`.
 
@@ -295,20 +299,23 @@ class Stream:
         general rule without it. Account topics (``account.orders``,
         ``account.positions``, ``account.balances``, ``account.fills``) need
         ``connection_id`` and take no instrument: the request carries none.
-        ``params`` matter only for ``book.top`` (``depth`` 1-200,
-        ``interval_ms`` >= 50); other topics ignore them. The reply names the
-        subscription id and the connection; an ``error`` reply raises
+        ``workspace`` takes neither: the layout is one per terminal, and the
+        first frame is the current snapshot. ``params`` matter only for
+        ``book.top`` (``depth`` 1-200, ``interval_ms`` >= 50); other topics
+        ignore them. The reply names the subscription id and the connection
+        (``None`` for ``workspace``); an ``error`` reply raises
         :class:`~spectre_terminal.errors.StreamRequestError`.
         """
         account = is_account_topic(topic)
+        workspace = topic == WORKSPACE_TOPIC
         if account and connection_id is None:
             raise ValueError(f"{topic} needs connection_id: account topics have no default")
-        if not account and instrument is None:
+        if not account and not workspace and instrument is None:
             raise ValueError(f"{topic} needs an instrument")
         request: dict[str, Any] = {"type": "subscribe", "topic": topic}
-        if instrument is not None and not account:
+        if instrument is not None and not account and not workspace:
             request["instrument"] = instrument
-        if connection_id is not None:
+        if connection_id is not None and not workspace:
             request["connection_id"] = int(connection_id)
         request["params"] = dict(params)
         frame = await self._request(request)

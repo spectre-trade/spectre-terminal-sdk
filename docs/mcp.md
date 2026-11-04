@@ -82,6 +82,19 @@ up in `open_orders` and `recent_fills`. The model is told so in the tool
 descriptions, and `place_order` requires `client_key` so that a retried call
 never doubles an order.
 
+Workspace tools — the layout the terminal shows. `workspace` is read-only;
+the commands are annotated as destructive like trading:
+
+| Tool | Arguments | Does |
+| --- | --- | --- |
+| `workspace` | — | every window with its tabs, stacks and charts, and the ids the commands take; ids change with every run of the terminal |
+| `open_stack` | `instrument`, optional `connection_id`, `chart`, `target` (`new_tab`, `new_window`), `window_id`, `activate` | a stack in a new tab or window, with a chart if asked; answers the new ids |
+| `open_multiview` | `base`, optional `target`, `window_id`, `activate` | a coin on every venue of «Exchange layout», as the Multiview button |
+| `set_stack_instrument` | `widget_id`, `instrument`, optional `connection_id` | another instrument in the stack and the charts that follow it |
+| `close_stack` | `widget_id` | closes one stack |
+| `close_tab`, `activate_tab` | `window_id`, `tab_id` | closes or selects a tab; the only tab of a window never closes |
+| `close_window`, `activate_window` | `window_id` | closes a window or brings it to the front; the main window never closes |
+
 Every tool that takes an instrument names the connection it used in the
 answer. Prices and sizes are decimal strings and should be kept as strings;
 timestamps are UTC milliseconds with an ISO twin (`ts` and `time`).

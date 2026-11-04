@@ -35,6 +35,15 @@ EXPECTED_TOOLS = {
     "amend_trigger",
     "set_leverage",
     "set_margin_mode",
+    "workspace",
+    "open_stack",
+    "open_multiview",
+    "set_stack_instrument",
+    "close_stack",
+    "close_tab",
+    "activate_tab",
+    "close_window",
+    "activate_window",
 }
 TRADING_TOOLS = {
     "place_order",
@@ -47,6 +56,14 @@ TRADING_TOOLS = {
     "amend_trigger",
     "set_leverage",
     "set_margin_mode",
+    "open_stack",
+    "open_multiview",
+    "set_stack_instrument",
+    "close_stack",
+    "close_tab",
+    "activate_tab",
+    "close_window",
+    "activate_window",
 }
 
 
@@ -445,3 +462,62 @@ async def test_leverage_tools(provider: TerminalProvider, fake_api: FakeApi) -> 
             },
         )
     assert "exactly one" in _error_text(raised.value)
+
+
+async def test_workspace_tools(provider: TerminalProvider, fake_api: FakeApi) -> None:
+    server = build_server(provider)
+    layout = _structured(await server.call_tool("workspace", {}))
+    assert fake_api.requests[-1][0] == "/v1/workspace"
+    window = layout["windows"][0]
+    assert window["id"] == 1 and window["main"] is True
+    assert window["tabs"][0]["stacks"][0]["widget_id"] == 12
+    assert window["tabs"][0]["charts"][0]["interval"] == "5m"
+    assert "do not keep them" in layout["note"]
+
+    opened = _structured(
+        await server.call_tool(
+            "open_stack",
+            {"instrument": "binance:futures:BTCUSDT", "chart": True, "activate": False},
+        )
+    )
+    assert opened == {"window_id": 1, "tab_id": 2, "stacks": [14], "charts": []}
+    method, path, body = fake_api.bodies[-1]
+    assert (method, path) == ("POST", "/v1/workspace/stacks")
+    assert body == {
+        "instrument": "binance:futures:BTCUSDT",
+        "chart": True,
+        "target": "new_tab",
+        "activate": False,
+    }
+
+    _structured(await server.call_tool("open_multiview", {"base": "BTC", "target": "new_window"}))
+    method, path, body = fake_api.bodies[-1]
+    assert (method, path) == ("POST", "/v1/workspace/multiview")
+    assert body == {"base": "BTC", "activate": True, "target": "new_window"}
+
+    _structured(
+        await server.call_tool(
+            "set_stack_instrument", {"widget_id": 12, "instrument": "binance:futures:ETHUSDT"}
+        )
+    )
+    method, path, body = fake_api.bodies[-1]
+    assert (method, path) == ("PATCH", "/v1/workspace/stacks/12")
+    assert body == {"instrument": "binance:futures:ETHUSDT"}
+
+    _structured(await server.call_tool("close_stack", {"widget_id": 12}))
+    assert fake_api.bodies[-1][:2] == ("DELETE", "/v1/workspace/stacks/12")
+    _structured(await server.call_tool("activate_tab", {"window_id": 1, "tab_id": 2}))
+    assert fake_api.bodies[-1][:2] == ("POST", "/v1/workspace/windows/1/tabs/2/activate")
+    _structured(await server.call_tool("close_tab", {"window_id": 1, "tab_id": 2}))
+    assert fake_api.bodies[-1][:2] == ("DELETE", "/v1/workspace/windows/1/tabs/2")
+    _structured(await server.call_tool("activate_window", {"window_id": 2}))
+    assert fake_api.bodies[-1][:2] == ("POST", "/v1/workspace/windows/2/activate")
+    _structured(await server.call_tool("close_window", {"window_id": 2}))
+    assert fake_api.bodies[-1][:2] == ("DELETE", "/v1/workspace/windows/2")
+
+    with pytest.raises(ToolError) as raised:
+        await server.call_tool("close_window", {"window_id": 1})
+    assert "invalid_request" in str(raised.value)
+    with pytest.raises(ToolError) as raised:
+        await server.call_tool("close_stack", {"widget_id": 99})
+    assert "not_found" in str(raised.value)

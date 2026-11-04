@@ -1,0 +1,31 @@
+{
+  "data": {
+    "windows": [
+      {
+        "id": 1,
+        "main": true,
+        "chart_window": false,
+        "focused": true,
+        "geometry": { "x": 0, "y": 0, "width": 1920, "height": 1080, "maximized": true },
+        "monitor": null,
+        "tabs": [
+          {
+            "id": 1,
+            "name": "XRP",
+            "active": true,
+            "stacks": [
+              { "widget_id": 12, "instrument": null, "connection_id": null,
+                "empty": false, "frozen": false,
+                "position": { "column": 0, "row": 0, "cell": 0 } }
+            ],
+            "charts": [
+              { "widget_id": 13, "instrument": null, "connection_id": null,
+                "interval": "5m", "owner_widget_id": null,
+                "position": { "column": 0, "row": 1, "cell": 0 } }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

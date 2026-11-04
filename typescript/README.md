@@ -61,7 +61,9 @@ Every operation of the contract has a method: `meta`, `health`,
 `accountPositions`, `accountBalances`, `accountFills`, `placeOrder`,
 `cancelOrder`, `cancelAll`, `closePosition`, `placeTrigger`, `cancelTrigger`,
 `cancelAllTriggers`, `amendTrigger`, `leverage`, `setLeverage`,
-`setMarginMode`, `stream`. Option names are
+`setMarginMode`, `workspace`, `workspaceWindow`, `openStack`, `openMultiview`,
+`setStackInstrument`, `closeStack`, `closeTab`, `activateTab`, `closeWindow`,
+`activateWindow`, `stream`. Option names are
 camelCase; response fields keep the wire names from the contract.
 
 ## Account
@@ -141,6 +143,17 @@ await terminal.cancelTrigger({ connectionId: 12, instrument, triggerId: trigger.
 console.log(await terminal.leverage({ connectionId: 12, instrument })); // not_active until the terminal touched it
 await terminal.setLeverage({ connectionId: 12, instrument, leverage: 20 });
 await terminal.setMarginMode({ connectionId: 12, instrument, marginMode: "isolated" });
+```
+
+The layout — windows, tabs, stacks and charts — is read with `workspace()`
+and changed with commands the window applies itself; ids are numbers of the
+current run of the terminal, and the `workspace` stream topic sends the
+whole layout on every change.
+
+```ts
+const opened = await terminal.openStack({ instrument, chart: true, activate: false });
+await terminal.setStackInstrument({ widgetId: opened.stacks[0]!, instrument: "binance:futures:ETHUSDT" });
+await terminal.closeTab({ windowId: opened.window_id!, tabId: opened.tab_id! });
 ```
 
 ## Money and time

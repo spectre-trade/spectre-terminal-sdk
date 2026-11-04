@@ -37,8 +37,11 @@ export type MarketTopic = "trades" | "ticker" | "mark_price" | "book.top" | "clu
 /** Account topics: `connection_id` is required on subscribe, `instrument` is not used. */
 export type AccountTopic = "account.orders" | "account.positions" | "account.balances" | "account.fills";
 
+/** The layout topic: one per terminal, subscribed without instrument or connection. */
+export type WorkspaceTopic = "workspace";
+
 /** Stream topics known to v1. */
-export type Topic = MarketTopic | AccountTopic;
+export type Topic = MarketTopic | AccountTopic | WorkspaceTopic;
 
 /** Error codes of the contract. New codes may appear within v1. */
 export type ErrorCode =
@@ -105,6 +108,8 @@ export interface Limits {
    * than the writing stage of the Local API.
    */
   commands_per_second?: number;
+  /** Workspace commands per second per listener. Absent before the window stage. */
+  workspace_commands_per_second?: number;
 }
 
 /** `GET /v1/meta`. */
@@ -572,6 +577,132 @@ export interface Accepted {
 }
 
 // ---------------------------------------------------------------------------
+// /v1/workspace
+
+/** A cell of a tab's grid: column left to right, row top to bottom, cell within the row. */
+export interface CellPosition {
+  column: number;
+  row: number;
+  cell: number;
+}
+
+/**
+ * A stack — order book with its trade tape and clusters — inside a tab.
+ * `widget_id` is global for this run of the terminal; `instrument` and
+ * `connection_id` are `null` while the stack is `empty`; `position` is
+ * `null` for a stack hidden inside a stack group.
+ */
+export interface Stack {
+  widget_id: number;
+  instrument: InstrumentAddress | null;
+  connection_id: number | null;
+  empty: boolean;
+  frozen: boolean;
+  position: CellPosition | null;
+}
+
+/** A chart inside a tab; `owner_widget_id` is the stack it follows, `null` when standalone. */
+export interface Chart {
+  widget_id: number;
+  instrument: InstrumentAddress | null;
+  connection_id: number | null;
+  /** Candle interval code (`1m`, `5m`, …). */
+  interval: string;
+  owner_widget_id: number | null;
+  position: CellPosition | null;
+}
+
+/** A tab of a window: `id` is numbered per window from 1; exactly one tab per window is `active`. */
+export interface Tab {
+  id: number;
+  name: string;
+  active: boolean;
+  stacks: Stack[];
+  charts: Chart[];
+}
+
+/** Window position and size in logical screen pixels. */
+export interface WindowGeometry {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  maximized: boolean;
+}
+
+/** A terminal window; `main` cannot be closed through the API, `chart_window` is a torn-off chart. */
+export interface Window {
+  id: number;
+  main: boolean;
+  chart_window: boolean;
+  focused: boolean;
+  geometry: WindowGeometry;
+  /** The OS's monitor name, or `null`. */
+  monitor: string | null;
+  tabs: Tab[];
+}
+
+/** `data` of `GET /v1/workspace` and of a `workspace` event: every window, by ascending id. */
+export interface WorkspaceSnapshot {
+  windows: Window[];
+}
+
+/** `GET /v1/workspace`. The ids are internal to this run of the terminal. */
+export interface Workspace {
+  data: WorkspaceSnapshot;
+}
+
+/** `GET /v1/workspace/windows/{id}`. */
+export interface WorkspaceWindow {
+  data: Window;
+}
+
+/** Where a workspace opening lands. */
+export type OpenTarget = "new_tab" | "new_window";
+
+/** The body of `POST /v1/workspace/stacks`. */
+export interface OpenStackRequest {
+  instrument: InstrumentAddress;
+  connection_id?: number;
+  /** A chart of the same instrument over the stack. */
+  chart?: boolean;
+  /** `new_tab` (default) or `new_window`. */
+  target?: OpenTarget;
+  /** The window for a new tab; the focused window when omitted. */
+  window_id?: number;
+  /** `false` opens the tab in the background; a new window always takes focus. */
+  activate?: boolean;
+}
+
+/** The body of `POST /v1/workspace/multiview`. */
+export interface OpenMultiviewRequest {
+  /** A coin (`BTC`) or a pair (`BTC/USDT`). */
+  base: string;
+  /** Omitted: the Multiview «open as» setting decides. */
+  target?: OpenTarget;
+  window_id?: number;
+  activate?: boolean;
+}
+
+/** The body of `PATCH /v1/workspace/stacks/{widget_id}`. */
+export interface StackInstrumentRequest {
+  instrument: InstrumentAddress;
+  connection_id?: number;
+}
+
+/**
+ * What the window did for a workspace command. For an opening: the window,
+ * the new tab and its `stacks` and `charts` in column order. For closing and
+ * activating: the touched ids, the rest `null` or empty.
+ */
+export interface WorkspaceOutcome {
+  window_id: number | null;
+  tab_id: number | null;
+  stacks: number[];
+  charts: number[];
+}
+
+// ---------------------------------------------------------------------------
 // /v1/stream
 
 /** Parameters of a `book.top` subscription; other topics take none. Wire names. */
@@ -605,9 +736,10 @@ export interface UnsubscribeRequest {
 export interface SubscribedFrame {
   type: "subscribed";
   request_id?: string;
-  /** Subscription id, `"{stream}:{topic}"` (`"{connection}:account.<topic>"`); pass it to `unsubscribe`. */
+  /** Subscription id, `"{stream}:{topic}"` (`"{connection}:account.<topic>"`, `"workspace"`); pass it to `unsubscribe`. */
   sub: string;
-  connection_id: number;
+  /** The connection chosen for market and account topics; absent for `workspace`. */
+  connection_id?: number;
 }
 
 /** Server reply to `unsubscribe`. */
@@ -713,6 +845,11 @@ export interface AccountFillsEvent extends EventFrame<Fill> {
   topic: "account.fills";
 }
 
+/** `data` of a `workspace` event: the whole layout; the first frame is the current snapshot. */
+export interface WorkspaceEvent extends EventFrame<WorkspaceSnapshot> {
+  topic: "workspace";
+}
+
 /**
  * An event of a topic this client version does not know (the contract may add
  * topics within v1). `topic` is `undefined`; the raw topic name is the part of
@@ -733,6 +870,7 @@ export type Event =
   | AccountPositionsEvent
   | AccountBalancesEvent
   | AccountFillsEvent
+  | WorkspaceEvent
   | UnknownTopicEvent;
 
 /** What iterating a {@link Stream} yields, in arrival order. */

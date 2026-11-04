@@ -61,6 +61,9 @@ async function route(method: string, url: URL, body: unknown): Promise<Reply | u
   if (url.pathname.startsWith("/v1/orders") || WRITE_PATHS.has(url.pathname)) {
     return routeWrite(method, url, body);
   }
+  if (url.pathname.startsWith("/v1/workspace")) {
+    return routeWorkspace(method, url, body);
+  }
   switch (url.pathname) {
     case "/v1/meta":
       return json("meta");
@@ -158,6 +161,43 @@ async function routeWrite(method: string, url: URL, body: unknown): Promise<Repl
   const key =
     url.pathname === "/v1/orders" ? accepted.key : url.pathname === "/v1/orders/trigger" ? "sl_1730294400123" : null;
   return { status: 200, body: JSON.stringify({ ...accepted, key }) };
+}
+
+/**
+ * `/v1/workspace*`: reads from the fixtures, writes answer the outcome fixture.
+ * Window 1 with tab 1 exists, stack 12 exists; the main window and the only
+ * tab refuse to close like the terminal does.
+ */
+async function routeWorkspace(method: string, url: URL, body: unknown): Promise<Reply> {
+  const parts = url.pathname.split("/").slice(3); // after /v1/workspace
+  const outcome = JSON.parse(await fixture("workspace_outcome")) as Record<string, unknown>;
+  const reply = (patch: Record<string, unknown>): Reply => ({ status: 200, body: JSON.stringify({ ...outcome, ...patch }) });
+  if (method === "GET") {
+    if (parts.length === 0) return json("workspace");
+    if (parts[0] === "windows" && parts[1] === "1" && parts.length === 2) return json("workspace_window");
+    return envelope(404, "not_found", "no such window");
+  }
+  if (method === "POST" && parts.length === 1 && parts[0] === "stacks") {
+    const instrument = typeof body === "object" && body !== null && "instrument" in body ? body.instrument : undefined;
+    if (instrument === "binance:futures:NOPE") return envelope(400, "invalid_request", "unknown instrument");
+    return reply({});
+  }
+  if (method === "POST" && parts.length === 1 && parts[0] === "multiview") return reply({});
+  if (parts[0] === "stacks" && parts.length === 2) {
+    if (parts[1] !== "12") return envelope(404, "not_found", "no stack with this widget_id");
+    if (method === "PATCH" || method === "DELETE") return reply({ stacks: [12], charts: [] });
+  }
+  if (parts[0] === "windows" && parts.length >= 2) {
+    if (parts[1] !== "1") return envelope(404, "not_found", "no such window");
+    if (parts.length === 2 && method === "DELETE") return envelope(400, "invalid_request", "the main window cannot be closed");
+    if (parts.length === 3 && parts[2] === "activate" && method === "POST") return reply({ tab_id: null, stacks: [], charts: [] });
+    if (parts[2] === "tabs" && (parts.length === 4 || parts.length === 5)) {
+      if (parts[3] !== "1") return envelope(404, "not_found", "no such tab");
+      if (parts.length === 4 && method === "DELETE") return envelope(400, "invalid_request", "the only tab");
+      if (parts.length === 5 && parts[4] === "activate" && method === "POST") return reply({ tab_id: 1, stacks: [], charts: [] });
+    }
+  }
+  return envelope(404, "not_found", "no such operation");
 }
 
 let server: Server;
@@ -633,4 +673,83 @@ test("constructor defaults and an empty token", () => {
   assert.equal(t.timeoutMs, 10_000);
   assert.equal(t.baseUrl, "http://127.0.0.1:48180/v1/");
   assert.throws(() => new Terminal({ token: "" }), { name: "TokenMissingError" });
+});
+
+test("workspace reads the snapshot and one window", async () => {
+  const t = terminal();
+  const workspace = await t.workspace();
+  assert.equal(last().method, "GET");
+  assert.equal(last().url.pathname, "/v1/workspace");
+  const main = workspace.data.windows.find((w) => w.main)!;
+  assert.equal(main.id, 1);
+  assert.equal(main.geometry.width, 1920);
+  assert.equal(main.tabs[0]?.name, "XRP");
+  assert.equal(main.tabs[0]?.stacks[0]?.widget_id, 12);
+  assert.equal(main.tabs[0]?.charts[0]?.interval, "5m");
+
+  const window = await t.workspaceWindow({ windowId: 1 });
+  assert.equal(last().url.pathname, "/v1/workspace/windows/1");
+  assert.equal(window.data.main, true);
+
+  const missing = await t.workspaceWindow({ windowId: 2 }).catch((e: unknown) => e);
+  assert.ok(missing instanceof ApiError);
+  assert.equal(missing.code, "not_found");
+  assert.throws(() => t.workspaceWindow({ windowId: 1.5 }), RangeError);
+});
+
+test("openStack and openMultiview post their bodies; refusals keep their codes", async () => {
+  const t = terminal();
+  const outcome = await t.openStack({ instrument: INSTRUMENT, chart: true, windowId: 1, activate: false });
+  assert.equal(last().method, "POST");
+  assert.equal(last().url.pathname, "/v1/workspace/stacks");
+  assert.deepEqual(last().body, { instrument: INSTRUMENT, chart: true, window_id: 1, activate: false });
+  assert.deepEqual([outcome.window_id, outcome.tab_id, outcome.stacks], [1, 2, [14]]);
+
+  await t.openStack({ instrument: INSTRUMENT, connectionId: 12, target: "new_window" });
+  assert.deepEqual(last().body, { instrument: INSTRUMENT, connection_id: 12, target: "new_window" });
+
+  await t.openMultiview({ base: "BTC" });
+  assert.equal(last().url.pathname, "/v1/workspace/multiview");
+  assert.deepEqual(last().body, { base: "BTC" });
+  await t.openMultiview({ base: "BTC", target: "new_tab", windowId: 1, activate: false });
+  assert.deepEqual(last().body, { base: "BTC", target: "new_tab", window_id: 1, activate: false });
+
+  const refused = await t.openStack({ instrument: "binance:futures:NOPE" }).catch((e: unknown) => e);
+  assert.ok(refused instanceof ApiError);
+  assert.equal(refused.code, "invalid_request");
+});
+
+test("stack, tab and window commands use their routes", async () => {
+  const t = terminal();
+  const repointed = await t.setStackInstrument({ widgetId: 12, instrument: INSTRUMENT, connectionId: 12 });
+  assert.equal(last().method, "PATCH");
+  assert.equal(last().url.pathname, "/v1/workspace/stacks/12");
+  assert.deepEqual(last().body, { instrument: INSTRUMENT, connection_id: 12 });
+  assert.deepEqual(repointed.stacks, [12]);
+
+  await t.closeStack({ widgetId: 12 });
+  assert.equal(last().method, "DELETE");
+  assert.equal(last().url.pathname, "/v1/workspace/stacks/12");
+  assert.equal(last().body, undefined);
+
+  await t.activateTab({ windowId: 1, tabId: 1 });
+  assert.equal(last().method, "POST");
+  assert.equal(last().url.pathname, "/v1/workspace/windows/1/tabs/1/activate");
+
+  await t.activateWindow({ windowId: 1 });
+  assert.equal(last().url.pathname, "/v1/workspace/windows/1/activate");
+
+  const onlyTab = await t.closeTab({ windowId: 1, tabId: 1 }).catch((e: unknown) => e);
+  assert.ok(onlyTab instanceof ApiError);
+  assert.equal(onlyTab.code, "invalid_request");
+  assert.equal(last().method, "DELETE");
+  assert.equal(last().url.pathname, "/v1/workspace/windows/1/tabs/1");
+
+  const mainWindow = await t.closeWindow({ windowId: 1 }).catch((e: unknown) => e);
+  assert.ok(mainWindow instanceof ApiError);
+  assert.equal(mainWindow.code, "invalid_request");
+
+  const noStack = await t.closeStack({ widgetId: 99 }).catch((e: unknown) => e);
+  assert.ok(noStack instanceof ApiError);
+  assert.equal(noStack.code, "not_found");
 });

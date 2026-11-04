@@ -46,6 +46,9 @@ from .models import (
     Page,
     Snapshot,
     Trades,
+    Window,
+    Workspace,
+    WorkspaceOutcome,
 )
 from .stream import Stream
 
@@ -651,6 +654,126 @@ class Terminal:
             "margin_mode": margin_mode,
         }
         return Accepted.from_dict(self._send("POST", "/account/margin-mode", body))
+
+    # --- workspace --------------------------------------------------------
+
+    def workspace(self) -> Workspace:
+        """``GET /v1/workspace`` (``workspace:read``): every window, its tabs, stacks and charts.
+
+        Read from the snapshot the window publishes at every structural
+        change, so the call never waits on the window. The ids are internal
+        to this run of the terminal.
+        """
+        return Workspace.from_dict(self._get("/workspace"))
+
+    def workspace_window(self, window_id: int) -> Window:
+        """``GET /v1/workspace/windows/{id}``: one window; an unknown id is ``not_found``."""
+        return Window.from_dict(self._get(f"/workspace/windows/{int(window_id)}")["data"])
+
+    def open_stack(
+        self,
+        instrument: str,
+        *,
+        connection_id: int | None = None,
+        chart: bool = False,
+        target: str = "new_tab",
+        window_id: int | None = None,
+        activate: bool = True,
+    ) -> WorkspaceOutcome:
+        """``POST /v1/workspace/stacks`` (``workspace:write``): a stack in a new tab or window.
+
+        ``target`` is ``new_tab`` (in ``window_id``, or the focused window
+        without it) or ``new_window``. ``chart`` opens a chart of the same
+        instrument over the stack. ``activate=False`` opens the tab in the
+        background; a new window always takes focus. The answer names the
+        window, the tab and the new widgets. An instrument the terminal's
+        catalogue does not know is ``invalid_request``.
+        """
+        if target not in ("new_tab", "new_window"):
+            raise ValueError("target must be new_tab or new_window")
+        body: dict[str, Any] = {
+            "instrument": instrument,
+            "chart": bool(chart),
+            "target": target,
+            "activate": bool(activate),
+        }
+        if connection_id is not None:
+            body["connection_id"] = int(connection_id)
+        if window_id is not None:
+            body["window_id"] = int(window_id)
+        return WorkspaceOutcome.from_dict(self._send("POST", "/workspace/stacks", body))
+
+    def open_multiview(
+        self,
+        base: str,
+        *,
+        target: str | None = None,
+        window_id: int | None = None,
+        activate: bool = True,
+    ) -> WorkspaceOutcome:
+        """``POST /v1/workspace/multiview`` (``workspace:write``): a coin on every venue.
+
+        The same plan as the window's Multiview button. ``base`` is a coin
+        (``BTC``) or a pair (``BTC/USDT``); ``target`` left ``None`` follows
+        the Multiview «open as» setting. No cell for the coin is ``not_found``.
+        """
+        if target is not None and target not in ("new_tab", "new_window"):
+            raise ValueError("target must be new_tab, new_window or None")
+        body: dict[str, Any] = {"base": base, "activate": bool(activate)}
+        if target is not None:
+            body["target"] = target
+        if window_id is not None:
+            body["window_id"] = int(window_id)
+        return WorkspaceOutcome.from_dict(self._send("POST", "/workspace/multiview", body))
+
+    def set_stack_instrument(
+        self, widget_id: int, instrument: str, *, connection_id: int | None = None
+    ) -> WorkspaceOutcome:
+        """``PATCH /v1/workspace/stacks/{widget_id}``: another instrument in the stack's group."""
+        body: dict[str, Any] = {"instrument": instrument}
+        if connection_id is not None:
+            body["connection_id"] = int(connection_id)
+        return WorkspaceOutcome.from_dict(
+            self._send("PATCH", f"/workspace/stacks/{int(widget_id)}", body)
+        )
+
+    def close_stack(self, widget_id: int) -> WorkspaceOutcome:
+        """``DELETE /v1/workspace/stacks/{widget_id}``: close one stack, as its close button."""
+        return WorkspaceOutcome.from_dict(
+            self._send("DELETE", f"/workspace/stacks/{int(widget_id)}", None)
+        )
+
+    def close_tab(self, window_id: int, tab_id: int) -> WorkspaceOutcome:
+        """``DELETE /v1/workspace/windows/{id}/tabs/{tab}``: close a tab.
+
+        The only tab of a window cannot be closed (``invalid_request``).
+        """
+        return WorkspaceOutcome.from_dict(
+            self._send("DELETE", f"/workspace/windows/{int(window_id)}/tabs/{int(tab_id)}", None)
+        )
+
+    def activate_tab(self, window_id: int, tab_id: int) -> WorkspaceOutcome:
+        """``POST /v1/workspace/windows/{id}/tabs/{tab}/activate``: select the tab.
+
+        The window's focus is untouched; see :meth:`activate_window`.
+        """
+        return WorkspaceOutcome.from_dict(
+            self._send(
+                "POST", f"/workspace/windows/{int(window_id)}/tabs/{int(tab_id)}/activate", {}
+            )
+        )
+
+    def close_window(self, window_id: int) -> WorkspaceOutcome:
+        """``DELETE /v1/workspace/windows/{id}``: the main window is ``invalid_request``."""
+        return WorkspaceOutcome.from_dict(
+            self._send("DELETE", f"/workspace/windows/{int(window_id)}", None)
+        )
+
+    def activate_window(self, window_id: int) -> WorkspaceOutcome:
+        """``POST /v1/workspace/windows/{id}/activate``: restore and bring to the front."""
+        return WorkspaceOutcome.from_dict(
+            self._send("POST", f"/workspace/windows/{int(window_id)}/activate", {})
+        )
 
     def stream(self) -> Stream:
         """A :class:`~spectre_terminal.stream.Stream` for ``/v1/stream``, for ``async with``."""

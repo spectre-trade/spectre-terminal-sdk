@@ -20,9 +20,9 @@ include the token in the text.
 | `invalid_request` | 400 | bad instrument, interval, depth, cursor, or a `connection_id` of another venue | fix the parameters |
 | `unsupported` | 501 | the venue is not relayed (MOEX), or the terminal was built without the market-data tap (`meta().topics` is empty) | nothing to retry |
 | `not_active` | 409 | clusters of the instrument are not computed yet, or its leverage is not loaded yet | clusters: retry in a few seconds, the subscription is held; leverage: open the instrument in the terminal or set the leverage |
-| `rate_limited` | 429 | stream connections, subscriptions, API-only instruments, the per-second subscription rate, or more than 10 trading commands per second | wait and retry; reuse connections |
+| `rate_limited` | 429 | stream connections, subscriptions, API-only instruments, the per-second subscription rate, more than 10 trading commands or 5 workspace commands per second | wait and retry; reuse connections |
 | `not_tradable` | 409 | the connection does not trade: disabled, read-only, or without credentials | pick a trading connection from `connections()` |
-| `unavailable` | 503 | the exchange, storage or coordinator did not answer; no data within 3 s | retry later |
+| `unavailable` | 503 | the exchange, storage or coordinator did not answer; no data within 3 s; no terminal window to apply a workspace command, or it did not answer within 2 s | retry later |
 
 ## Client-side errors
 

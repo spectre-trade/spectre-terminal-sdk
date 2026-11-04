@@ -24,14 +24,20 @@ export type {
   DiscoverOptions,
   InstrumentCommandOptions,
   InstrumentsOptions,
+  OpenMultiviewOptions,
+  OpenStackOptions,
   OrderbookOptions,
   PlaceOrderOptions,
   PlaceTriggerOptions,
   SetLeverageOptions,
   SetMarginModeOptions,
+  StackInstrumentOptions,
+  StackOptions,
   StreamOptions,
+  TabOptions,
   TerminalOptions,
   TradesOptions,
+  WindowOptions,
 } from "./client.ts";
 
 export { Stream, StreamProtocol } from "./stream.ts";

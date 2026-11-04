@@ -22,9 +22,12 @@ clients add the header for you and never put the token into error messages,
 | `market:read` | catalogue, candles, intervals, trades, snapshot, order book, clusters, the market topics of the stream |
 | `connections:read` | `/v1/connections` |
 | `account:read` | `/v1/account/*` and the `account.*` stream topics |
-| `trading:write` | `/v1/orders`, `/v1/orders/cancel-all`, `/v1/positions/close` |
+| `trading:write` | `/v1/orders`, `/v1/orders/trigger`, `/v1/positions/close`, `/v1/account/leverage`, `/v1/account/margin-mode` |
+| `workspace:read` | `/v1/workspace` and the `workspace` stream topic |
+| `workspace:write` | opening, closing and selecting stacks, tabs and windows under `/v1/workspace` |
+| `settings:read`, `settings:write` | granted ahead of the settings operations; no operation takes them yet |
 
-`/v1/meta` and `/v1/health` need any valid token. All four scopes are
+`/v1/meta` and `/v1/health` need any valid token. All scopes are
 granted: there is no separate write switch, the Local API toggle is the one
 consent and the one kill switch (a product decision). `meta().scopes` tells
 you what a token has; a terminal older than a scope simply does not list it,

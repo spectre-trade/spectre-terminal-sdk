@@ -34,6 +34,8 @@ ROUTES = {
     "/v1/account/balances": "account_balances.json",
     "/v1/account/fills": "account_fills.json",
     "/v1/account/leverage": "leverage.json",
+    "/v1/workspace": "workspace.json",
+    "/v1/workspace/windows/1": "workspace_window.json",
 }
 
 
@@ -109,6 +111,9 @@ class _Handler(BaseHTTPRequestHandler):
         if self.headers.get("Authorization") != f"Bearer {TOKEN}":
             self._error(401, "unauthorized", "token does not match")
             return
+        if url.path.startswith("/v1/workspace"):
+            self._workspace_write(method, url.path)
+            return
         connection_id = body.get("connection_id") or (
             int(parse_qs(url.query).get("connection_id", ["0"])[0])
         )
@@ -131,6 +136,19 @@ class _Handler(BaseHTTPRequestHandler):
         elif url.path != "/v1/orders":
             accepted = {**accepted, "key": None}
         self._send(200, accepted)
+
+    def _workspace_write(self, method: str, path: str) -> None:
+        """Workspace commands answer the outcome fixture; window 1 and tab 1 refuse to close."""
+        if path == "/v1/workspace/windows/1" and method == "DELETE":
+            self._error(400, "invalid_request", "the main window cannot be closed")
+            return
+        if path == "/v1/workspace/windows/1/tabs/1" and method == "DELETE":
+            self._error(400, "invalid_request", "the only tab of a window cannot be closed")
+            return
+        if path.startswith("/v1/workspace/stacks/99"):
+            self._error(404, "not_found", "no stack with widget_id 99")
+            return
+        self._send(200, load_fixture("workspace_outcome.json"))
 
     def do_POST(self) -> None:  # noqa: N802 — http.server API
         self._write("POST")

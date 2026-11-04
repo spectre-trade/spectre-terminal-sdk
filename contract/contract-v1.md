@@ -29,10 +29,12 @@ the supported clients are the SDK packages.
   handshake alike. A token in the query string is not accepted.
 - Token scopes: `market:read` (market data, catalogue, stream),
   `connections:read` (connections), `account:read` (orders, positions,
-  balances, fills) and `trading:write` (placing and cancelling orders,
-  closing positions). All are granted: there is no separate write switch,
-  an enabled Local API grants everything (product decision). A token issued
-  before a scope existed receives it on the next terminal start.
+  balances, fills), `trading:write` (placing and cancelling orders,
+  closing positions), `workspace:read` and `workspace:write` (the layout:
+  windows, tabs, stacks), `settings:read` and `settings:write` (settings).
+  All are granted: there is no separate write switch, an enabled Local API
+  grants everything (product decision). A token issued before a scope
+  existed receives it on the next terminal start.
 
 A request is rejected before processing when:
 
@@ -75,9 +77,9 @@ There is no CORS layer on purpose: a browser page must not reach the API.
 | `invalid_request` | 400 | parameters: bad instrument, interval, depth, foreign `connection_id` |
 | `unsupported` | 501 | the venue's data is not relayed (MOEX) or the terminal was built without the market-data tap |
 | `not_active` | 409 | clusters of the instrument are not being computed yet (see `/market/clusters`) or the instrument's leverage is not loaded yet (see `/account/leverage`) |
-| `rate_limited` | 429 | ceiling on connections, subscriptions, instruments, subscription rate or trading commands |
+| `rate_limited` | 429 | ceiling on connections, subscriptions, instruments, subscription rate, trading commands or workspace commands |
 | `not_tradable` | 409 | the connection does not trade: disabled, read-only or without credentials |
-| `unavailable` | 503 | storage, exchange or coordinator did not answer; no data yet |
+| `unavailable` | 503 | storage, exchange, coordinator or the window did not answer; no data yet |
 
 MOEX data is not served through the API (`unsupported`) while the product
 question of relaying it stays open.
@@ -642,7 +644,124 @@ the exchange answered.
 `cross` or `isolated`. Changing it with an open position is refused by the
 exchange, as in the window — the `accepted` answer does not know that.
 
-## Stream `/v1/stream` — `market:read` (account topics: `account:read`)
+## Workspace — `workspace:read`, `workspace:write`
+
+The terminal's windows, their tabs, stacks (an order book with its trade
+tape and clusters) and charts. Reading is a snapshot the window publishes at
+every structural change (a stack added or closed, a coin picked, a window
+opened or closed, a tab moved), on a focus change and after every API
+command; the window's thread takes no part in a read. Writing is a command
+to the window: the window applies it through the same paths a trader's
+click takes and answers with the outcome after it published the new
+snapshot, so `GET /v1/workspace` right after the answer already shows the
+change. The window shows no confirmation dialogs.
+
+The ids are internal numbers of this run of the terminal: `window_id` and
+`widget_id` (a stack or a chart) are global, `tab_id` is numbered per window
+from 1, so a tab is addressed by the pair window, tab. After a restart the
+numbers differ — a client reads them again from `GET /v1/workspace` or the
+`workspace` topic.
+
+### `GET /v1/workspace`, `GET /v1/workspace/windows/{id}`
+
+```json
+{
+  "data": {
+    "windows": [
+      {
+        "id": 1, "main": true, "chart_window": false, "focused": true,
+        "geometry": { "x": 0, "y": 0, "width": 1920, "height": 1080, "maximized": true },
+        "monitor": "DP-1",
+        "tabs": [
+          {
+            "id": 1, "name": "XRP", "active": true,
+            "stacks": [
+              { "widget_id": 12, "instrument": "binance:futures:XRPUSDT",
+                "connection_id": 25, "empty": false, "frozen": false,
+                "position": { "column": 0, "row": 1, "cell": 0 } }
+            ],
+            "charts": [
+              { "widget_id": 13, "instrument": "binance:futures:XRPUSDT",
+                "connection_id": 25, "interval": "5m", "owner_widget_id": 12,
+                "position": { "column": 0, "row": 0, "cell": 0 } }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+Windows by ascending `id`. `main` is the main window, whose close quits the
+terminal; `chart_window` is a torn-off chart window; `focused` is the
+window with the OS focus. `geometry` is in logical screen pixels; `monitor`
+is the monitor name from the OS or `null`. Exactly one tab per window is
+`active`. A stack's `instrument` and `connection_id` are `null` while the
+stack is `empty`; `frozen` is a frozen stack. `position` is the cell of the
+tab's grid (column left to right, row top to bottom, cell within the row),
+`null` for a stack hidden inside a stack group. A chart's `owner_widget_id`
+is the stack it follows, `null` for a standalone chart. A window by `id` is
+the same object; an unknown one is `404 not_found`.
+
+### `POST /v1/workspace/stacks` — open a stack
+
+```json
+{ "instrument": "binance:futures:BTCUSDT", "connection_id": 25,
+  "chart": true, "target": "new_tab", "window_id": 1, "activate": true }
+```
+
+| Field | Value |
+| --- | --- |
+| `instrument` | an instrument of the catalogue; unknown — `400 invalid_request` |
+| `connection_id` | by the general rule: without it the trading connection of the venue and market, else read-only |
+| `chart` | open a chart of the same instrument over the stack; default `false` |
+| `target` | `new_tab` (default) — a new tab of window `window_id`, or of the focused window without it; `new_window` — a new window |
+| `activate` | default `true`; `false` opens the tab in the background, the window's selected tab stays. A new window always takes focus |
+
+The tab is named after the instrument's symbol. The chart's side and share
+come from the Multiview settings («Charts of all instruments»); with «No
+charts» the chart still opens on top. The answer is the window's outcome:
+
+```json
+{ "window_id": 1, "tab_id": 2, "stacks": [14], "charts": [15] }
+```
+
+`window_id` and `tab_id` are where it opened, `stacks` and `charts` the
+widgets of the new tab in column order. Every command below answers in the
+same shape: the touched ids filled in, the rest `null` or empty.
+
+### `POST /v1/workspace/multiview` — a coin on every venue
+
+```json
+{ "base": "BTC", "target": "new_window", "activate": true }
+```
+
+The same plan as the Multiview button in the window: the rows of «Exchange
+layout», their stack and chart toggles, the venue's quote currency. `base`
+is a coin or a pair (`BTC`, `BTC/USDT`, `BTCUSDT`). `target` left out
+follows the Multiview «open as» setting. No cell at all (the coin is on no
+enabled row) — `404 not_found`. The answer is as for a stack.
+
+### Stack, tab, window
+
+| Operation | Does | Refusals |
+| --- | --- | --- |
+| `PATCH /v1/workspace/stacks/{widget_id}` `{ "instrument", "connection_id"? }` | another instrument in the stack and the charts of its group | `not_found` — no such stack; a chart — `invalid_request` |
+| `DELETE /v1/workspace/stacks/{widget_id}` | close the stack, as its close button does | `not_found`; a chart — `invalid_request` |
+| `DELETE /v1/workspace/windows/{id}/tabs/{tab}` | close a tab | the only tab of a window — `invalid_request`; no window or tab — `not_found` |
+| `POST /v1/workspace/windows/{id}/tabs/{tab}/activate` | select the tab in its window; the window's focus is untouched | `not_found` |
+| `DELETE /v1/workspace/windows/{id}` | close a window | the main window — `invalid_request`; no window — `not_found` |
+| `POST /v1/workspace/windows/{id}/activate` | restore if minimised and bring to the front | `not_found` |
+
+A stack in a non-active tab makes that tab active for the duration of the
+command and restores the previous one: the trader sees one frame change,
+not a foreign tab. Workspace commands are limited to 5 per second per
+listener (`rate_limited` beyond that); no window at all (headless) or a
+window that did not answer within 2 s — `503 unavailable`, the command is
+not retried.
+
+## Stream `/v1/stream` — `market:read` (account topics: `account:read`, `workspace`: `workspace:read`)
 
 WebSocket at the same address: `ws://127.0.0.1:48180/v1/stream`, the token in
 the handshake header. All frames are text JSON with a `type` field.
@@ -653,6 +772,7 @@ the handshake header. All frames are text JSON with a `type` field.
 { "type": "subscribe", "request_id": "r1", "topic": "trades",
   "instrument": "binance:futures:BTCUSDT", "connection_id": 12, "params": {} }
 { "type": "subscribe", "request_id": "r3", "topic": "account.fills", "connection_id": 12 }
+{ "type": "subscribe", "request_id": "r4", "topic": "workspace" }
 { "type": "unsubscribe", "request_id": "r2", "sub": "7:trades" }
 ```
 
@@ -660,7 +780,8 @@ the handshake header. All frames are text JSON with a `type` field.
 topics `instrument` is required and `connection_id` is chosen by the general
 rule. For account topics (`account.*`) it is the other way round:
 `connection_id` is required, `instrument` is not used, and the scope is
-`account:read`. `params` apply only to `book.top`; other topics ignore them.
+`account:read`. `workspace` takes neither, with the scope `workspace:read`.
+`params` apply only to `book.top`; other topics ignore them.
 
 ### Responses and events
 
@@ -674,8 +795,10 @@ rule. For account topics (`account.*`) it is the other way round:
 ```
 
 - `sub` is the subscription identifier, `"{stream}:{topic}"`; for account
-  topics `"{connection}:account.<topic>"`. It is the same for every client
-  subscribed to the pair and topic; `unsubscribe` accepts only it.
+  topics `"{connection}:account.<topic>"`, for the layout `"workspace"`. It
+  is the same for every client subscribed to the pair and topic;
+  `unsubscribe` accepts only it. `connection_id` in `subscribed` is present
+  for market and account topics; `workspace` has none.
 - `seq` is the event number within the subscription; it grows by one for
   `trades`. For conflated topics gaps in the numbering are normal.
 - `gap` arrives before the first frame after a loss, only for `trades`: the
@@ -698,6 +821,7 @@ rule. For account topics (`account.*`) it is the other way round:
 | `account.positions` | — | `{ "instrument", "position": {...} }`, as an element of `/account/positions`; a close is `"position": null` | conflation |
 | `account.balances` | — | one currency's balance, as an element of `/account/balances` | conflation |
 | `account.fills` | — | one fill, as an element of `/account/fills` | a frame per fill; one that does not fit is lost and `seq` shows the gap — re-read `/account/fills` with `since_ts` |
+| `workspace` | — | the whole layout snapshot, as `data` in `/workspace` | the first frame is the current snapshot right on subscribe; then a frame per change; conflated: the latest state |
 
 `book.top` parameters are per subscriber; values out of range give
 `error invalid_request` on the request. A `clusters` frame arrives for every
@@ -740,9 +864,11 @@ Printed in `/v1/meta`; a refusal is `error rate_limited` on the request or a
 
 ## What the API does not do in v1
 
-- It does not write settings and does not open order books in the window.
-  Of trading, there is no grid move by dragging (`MoveOrderGrid`) and no
-  trading on MOEX.
+- It does not write settings. Of the layout, it does not open empty
+  windows, nor the screener, finres and orders windows, does not move
+  stacks between tabs and does not change column widths — those are read
+  only. Of trading, there is no grid move by dragging (`MoveOrderGrid`) and
+  no trading on MOEX.
 - It does not vouch for the outcome at the exchange: `accepted` is accepted
   by the terminal, the outcome is read from the account.
 - It does not serve account history of past sessions: fills and balances
@@ -762,8 +888,12 @@ Printed in `/v1/meta`; a refusal is `error rate_limited` on the request or a
   `contract` test, and that is v2, not a v1 change.
 - The market-data tap is built by the `local-api` feature, which is in the
   default build. A build without the tap: `cargo build --no-default-features`;
-  in it `topics` is empty and the stream and market operations answer
-  `unsupported`.
+  in it only `workspace` remains in `topics` (the layout is published by the
+  window, not the loop), and the stream of market topics and the market
+  operations answer `unsupported`.
+- The layout: the snapshot lives in `src/modules/workspace/`, published by
+  `ui/app_handler/workspace_api.rs`; commands reach the window as the
+  `UserEvent::Workspace` event through the `WorkspaceGateway`.
 - Load run: `cargo test --release --features local-api-bench --test it
   local_api::load -- --ignored --nocapture`. Cost of the tap per event:
   `cargo test --release --features local-api-bench --lib market_feed_cost --

@@ -584,3 +584,105 @@ def test_token_never_appears_in_errors_or_repr(fake_terminal: FakeTerminal) -> N
         assert TOKEN not in str(excinfo.value)
         assert TOKEN not in repr(excinfo.value)
         assert TOKEN not in repr(vars(excinfo.value))
+
+
+# --- workspace ----------------------------------------------------------------
+
+
+def test_workspace_reads_the_snapshot_and_one_window(fake_terminal: FakeTerminal) -> None:
+    terminal = client(fake_terminal)
+    workspace = terminal.workspace()
+    assert fake_terminal.last.method == "GET" and fake_terminal.last.path == "/v1/workspace"
+    assert workspace.main is not None and workspace.main.id == 1
+    tab = workspace.main.active_tab
+    assert tab is not None and tab.name == "XRP"
+    stack = workspace.stack(12)
+    assert stack is not None and stack.position is not None and stack.position.column == 0
+    assert tab.charts[0].interval == "5m"
+
+    window = terminal.workspace_window(1)
+    assert fake_terminal.last.path == "/v1/workspace/windows/1"
+    assert window.main and window.width == 1920 and window.maximized
+    assert window.tab(1) is not None and window.tab(2) is None
+
+    with pytest.raises(ApiError) as error:
+        terminal.workspace_window(2)
+    assert (error.value.code, error.value.status) == ("not_found", 404)
+
+
+def test_open_stack_and_multiview_send_their_bodies(fake_terminal: FakeTerminal) -> None:
+    terminal = client(fake_terminal)
+    outcome = terminal.open_stack(INSTRUMENT, chart=True, window_id=1, activate=False)
+    request = fake_terminal.last
+    assert request.method == "POST" and request.path == "/v1/workspace/stacks"
+    assert request.body == {
+        "instrument": INSTRUMENT,
+        "chart": True,
+        "target": "new_tab",
+        "window_id": 1,
+        "activate": False,
+    }
+    assert (outcome.window_id, outcome.tab_id, outcome.stacks) == (1, 2, [14])
+
+    terminal.open_stack(INSTRUMENT, connection_id=12, target="new_window")
+    assert fake_terminal.last.body == {
+        "instrument": INSTRUMENT,
+        "chart": False,
+        "target": "new_window",
+        "activate": True,
+        "connection_id": 12,
+    }
+    with pytest.raises(ValueError):
+        terminal.open_stack(INSTRUMENT, target="somewhere")
+
+    terminal.open_multiview("BTC")
+    request = fake_terminal.last
+    assert request.path == "/v1/workspace/multiview"
+    assert request.body == {"base": "BTC", "activate": True}
+    terminal.open_multiview("BTC", target="new_window", window_id=1, activate=False)
+    assert fake_terminal.last.body == {
+        "base": "BTC",
+        "activate": False,
+        "target": "new_window",
+        "window_id": 1,
+    }
+
+    with pytest.raises(ApiError) as error:
+        terminal.open_stack("binance:futures:NOPE")
+    assert error.value.code == "invalid_request"
+
+
+def test_stack_tab_and_window_commands_use_their_routes(fake_terminal: FakeTerminal) -> None:
+    terminal = client(fake_terminal)
+    outcome = terminal.set_stack_instrument(12, INSTRUMENT, connection_id=12)
+    request = fake_terminal.last
+    assert request.method == "PATCH" and request.path == "/v1/workspace/stacks/12"
+    assert request.body == {"instrument": INSTRUMENT, "connection_id": 12}
+    assert outcome.stacks == [12]
+
+    terminal.close_stack(12)
+    request = fake_terminal.last
+    assert request.method == "DELETE" and request.path == "/v1/workspace/stacks/12"
+    assert request.body is None
+
+    terminal.activate_tab(1, 1)
+    request = fake_terminal.last
+    assert request.method == "POST" and request.path == "/v1/workspace/windows/1/tabs/1/activate"
+
+    terminal.activate_window(1)
+    request = fake_terminal.last
+    assert request.method == "POST" and request.path == "/v1/workspace/windows/1/activate"
+
+    with pytest.raises(ApiError) as error:
+        terminal.close_tab(1, 1)
+    assert (error.value.code, error.value.status) == ("invalid_request", 400)
+    assert fake_terminal.last.method == "DELETE"
+    assert fake_terminal.last.path == "/v1/workspace/windows/1/tabs/1"
+
+    with pytest.raises(ApiError) as error:
+        terminal.close_window(1)
+    assert error.value.code == "invalid_request"
+
+    with pytest.raises(ApiError) as error:
+        terminal.close_stack(99)
+    assert error.value.code == "not_found"

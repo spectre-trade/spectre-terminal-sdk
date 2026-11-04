@@ -49,6 +49,7 @@ const KNOWN_TOPICS: ReadonlySet<string> = new Set<Topic>([
   "account.positions",
   "account.balances",
   "account.fills",
+  "workspace",
 ]);
 
 /** Account topics are keyed by connection, not instrument. */
@@ -56,11 +57,17 @@ function isAccountTopic(topic: Topic): boolean {
   return topic.startsWith("account.");
 }
 
+/** The layout topic takes neither instrument nor connection. */
+function isWorkspaceTopic(topic: Topic): boolean {
+  return topic === "workspace";
+}
+
 /**
  * Options of {@link Stream.subscribe}. Market topics (`trades`, `ticker`,
  * `mark_price`, `book.top`, `clusters`) take `instrument`, with
  * `connectionId` chosen by the general rule when omitted; account topics
- * (`account.*`) take `connectionId` and no instrument.
+ * (`account.*`) take `connectionId` and no instrument; `workspace` takes
+ * neither and gets the current layout as its first frame.
  */
 export interface SubscribeOptions {
   topic: Topic;
@@ -336,15 +343,16 @@ export class Stream implements AsyncIterable<StreamFrame> {
    */
   async subscribe(options: SubscribeOptions): Promise<Subscribed> {
     const account = isAccountTopic(options.topic);
+    const workspace = isWorkspaceTopic(options.topic);
     const request: SubscribeRequest = {
       type: "subscribe",
       request_id: this.#protocol.nextRequestId(),
       topic: options.topic,
     };
-    if (!account && options.instrument !== undefined) {
+    if (!account && !workspace && options.instrument !== undefined) {
       request.instrument = options.instrument;
     }
-    if (options.connectionId !== undefined) {
+    if (!workspace && options.connectionId !== undefined) {
       request.connection_id = options.connectionId;
     }
     if (options.params !== undefined) {

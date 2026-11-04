@@ -62,7 +62,9 @@ Every operation of the contract is a method of `Terminal`: `meta`, `health`,
 `account_orders`, `account_positions`, `account_balances`, `account_fills`,
 `place_order`, `cancel_order`, `cancel_all`, `close_position`, `place_trigger`,
 `cancel_trigger`, `cancel_all_triggers`, `amend_trigger`, `leverage`,
-`set_leverage`, `set_margin_mode`, `stream`.
+`set_leverage`, `set_margin_mode`, `workspace`, `workspace_window`,
+`open_stack`, `open_multiview`, `set_stack_instrument`, `close_stack`,
+`close_tab`, `activate_tab`, `close_window`, `activate_window`, `stream`.
 Errors derive from `SpectreTerminalError`; the terminal's own refusals are
 `ApiError` with the contract's `code` and the HTTP `status`.
 
@@ -159,6 +161,18 @@ print(
 )  # not_active until the terminal touched the instrument
 terminal.set_leverage(12, "binance:futures:BTCUSDT", leverage=20)
 terminal.set_margin_mode(12, "binance:futures:BTCUSDT", "isolated")
+```
+
+The layout — windows, tabs, stacks and charts — is read with `workspace()`
+and changed with commands the window applies itself: a stack opens in a new
+tab or window, tabs and windows are selected and closed, a stack is
+re-pointed or closed. Ids are numbers of the current run of the terminal;
+the `workspace` stream topic sends the whole layout on every change.
+
+```python
+opened = terminal.open_stack("binance:futures:BTCUSDT", chart=True, activate=False)
+terminal.set_stack_instrument(opened.stacks[0], "binance:futures:ETHUSDT")
+terminal.close_tab(opened.window_id, opened.tab_id)
 ```
 
 ## Documentation

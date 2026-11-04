@@ -39,6 +39,9 @@ import type {
   List,
   MarginMode,
   Meta,
+  OpenMultiviewRequest,
+  OpenStackRequest,
+  OpenTarget,
   Orderbook,
   OrderType,
   PlaceOrderRequest,
@@ -47,10 +50,14 @@ import type {
   SetMarginModeRequest,
   Side,
   Snapshot,
+  StackInstrumentRequest,
   TimeInForce,
   Trades,
   TriggerRule,
   TriggerType,
+  Workspace,
+  WorkspaceOutcome,
+  WorkspaceWindow,
 } from "./types.ts";
 
 /** The API version this client speaks. */
@@ -234,6 +241,54 @@ export interface SetMarginModeOptions {
   connectionId: number;
   instrument: InstrumentAddress;
   marginMode: MarginMode;
+}
+
+/** Options of {@link Terminal.workspaceWindow}, {@link Terminal.closeWindow} and {@link Terminal.activateWindow}. */
+export interface WindowOptions {
+  windowId: number;
+}
+
+/** Options of {@link Terminal.closeTab} and {@link Terminal.activateTab}: tabs are numbered per window. */
+export interface TabOptions {
+  windowId: number;
+  tabId: number;
+}
+
+/** Options of {@link Terminal.closeStack}. */
+export interface StackOptions {
+  widgetId: number;
+}
+
+/** Options of {@link Terminal.openStack}. */
+export interface OpenStackOptions {
+  instrument: InstrumentAddress;
+  /** Chosen by the general rule when omitted. */
+  connectionId?: number;
+  /** A chart of the same instrument over the stack. */
+  chart?: boolean;
+  /** `new_tab` (default) or `new_window`. */
+  target?: OpenTarget;
+  /** The window for a new tab; the focused window when omitted. */
+  windowId?: number;
+  /** `false` opens the tab in the background; a new window always takes focus. */
+  activate?: boolean;
+}
+
+/** Options of {@link Terminal.openMultiview}. */
+export interface OpenMultiviewOptions {
+  /** A coin (`BTC`) or a pair (`BTC/USDT`). */
+  base: string;
+  /** Omitted: the Multiview «open as» setting decides. */
+  target?: OpenTarget;
+  windowId?: number;
+  activate?: boolean;
+}
+
+/** Options of {@link Terminal.setStackInstrument}. */
+export interface StackInstrumentOptions {
+  widgetId: number;
+  instrument: InstrumentAddress;
+  connectionId?: number;
 }
 
 /** Options of {@link Terminal.stream}. */
@@ -618,6 +673,88 @@ export class Terminal {
     return this.#request<Accepted>("POST", "account/margin-mode", { body });
   }
 
+  // --- workspace -----------------------------------------------------------
+
+  /**
+   * `GET /v1/workspace` (`workspace:read`): every window with its tabs,
+   * stacks and charts, from the snapshot the window publishes at every
+   * structural change. The ids are internal to this run of the terminal.
+   */
+  workspace(): Promise<Workspace> {
+    return this.#get<Workspace>("workspace");
+  }
+
+  /** `GET /v1/workspace/windows/{id}` (`workspace:read`): one window; an unknown id is `not_found`. */
+  workspaceWindow(options: WindowOptions): Promise<WorkspaceWindow> {
+    return this.#get<WorkspaceWindow>(`workspace/windows/${windowPath(options.windowId)}`);
+  }
+
+  /**
+   * `POST /v1/workspace/stacks` (`workspace:write`): a stack of the instrument
+   * in a new tab or a new window, with a chart over it when `chart` is set.
+   * The answer names the window, the tab and the new widgets. An instrument
+   * the terminal's catalogue does not know is `invalid_request`.
+   */
+  openStack(options: OpenStackOptions): Promise<WorkspaceOutcome> {
+    const body: OpenStackRequest = {
+      instrument: options.instrument,
+      connection_id: options.connectionId,
+      chart: options.chart,
+      target: options.target,
+      window_id: options.windowId,
+      activate: options.activate,
+    };
+    return this.#request<WorkspaceOutcome>("POST", "workspace/stacks", { body });
+  }
+
+  /**
+   * `POST /v1/workspace/multiview` (`workspace:write`): a coin on every venue
+   * of «Exchange layout», the same plan as the window's Multiview button. No
+   * cell for the coin is `not_found`.
+   */
+  openMultiview(options: OpenMultiviewOptions): Promise<WorkspaceOutcome> {
+    const body: OpenMultiviewRequest = {
+      base: options.base,
+      target: options.target,
+      window_id: options.windowId,
+      activate: options.activate,
+    };
+    return this.#request<WorkspaceOutcome>("POST", "workspace/multiview", { body });
+  }
+
+  /** `PATCH /v1/workspace/stacks/{widget_id}` (`workspace:write`): another instrument in the stack and its charts. */
+  setStackInstrument(options: StackInstrumentOptions): Promise<WorkspaceOutcome> {
+    const body: StackInstrumentRequest = { instrument: options.instrument, connection_id: options.connectionId };
+    return this.#request<WorkspaceOutcome>("PATCH", `workspace/stacks/${windowPath(options.widgetId)}`, { body });
+  }
+
+  /** `DELETE /v1/workspace/stacks/{widget_id}` (`workspace:write`): close one stack, as its close button does. */
+  closeStack(options: StackOptions): Promise<WorkspaceOutcome> {
+    return this.#request<WorkspaceOutcome>("DELETE", `workspace/stacks/${windowPath(options.widgetId)}`, {});
+  }
+
+  /** `DELETE /v1/workspace/windows/{id}/tabs/{tab}` (`workspace:write`): the only tab of a window is `invalid_request`. */
+  closeTab(options: TabOptions): Promise<WorkspaceOutcome> {
+    return this.#request<WorkspaceOutcome>("DELETE", tabPath(options), {});
+  }
+
+  /** `POST /v1/workspace/windows/{id}/tabs/{tab}/activate` (`workspace:write`): select the tab; the window's focus is untouched. */
+  activateTab(options: TabOptions): Promise<WorkspaceOutcome> {
+    return this.#request<WorkspaceOutcome>("POST", `${tabPath(options)}/activate`, { body: {} });
+  }
+
+  /** `DELETE /v1/workspace/windows/{id}` (`workspace:write`): the main window is `invalid_request`. */
+  closeWindow(options: WindowOptions): Promise<WorkspaceOutcome> {
+    return this.#request<WorkspaceOutcome>("DELETE", `workspace/windows/${windowPath(options.windowId)}`, {});
+  }
+
+  /** `POST /v1/workspace/windows/{id}/activate` (`workspace:write`): restore if minimised and bring to the front. */
+  activateWindow(options: WindowOptions): Promise<WorkspaceOutcome> {
+    return this.#request<WorkspaceOutcome>("POST", `workspace/windows/${windowPath(options.windowId)}/activate`, {
+      body: {},
+    });
+  }
+
   /** Open `/v1/stream`. Node only: the token goes in the handshake header. */
   stream(options: StreamOptions = {}): Promise<Stream> {
     return Stream.connect({
@@ -691,6 +828,18 @@ export class Terminal {
 /** The wire body of `cancel-all` and `positions/close`. */
 function instrumentCommand(options: InstrumentCommandOptions): InstrumentCommandRequest {
   return { connection_id: options.connectionId, instrument: options.instrument };
+}
+
+/** An id in a workspace path: an integer, never a string the server would refuse. */
+function windowPath(id: number): string {
+  if (!Number.isInteger(id) || id < 0) {
+    throw new RangeError(`workspace ids are non-negative integers, got ${id}`);
+  }
+  return String(id);
+}
+
+function tabPath(options: TabOptions): string {
+  return `workspace/windows/${windowPath(options.windowId)}/tabs/${windowPath(options.tabId)}`;
 }
 
 /** `host:port`, bracketing an IPv6 literal. */

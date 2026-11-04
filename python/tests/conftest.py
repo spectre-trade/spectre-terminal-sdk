@@ -63,6 +63,9 @@ CONNECTION_ID = 12
 WRITE_PATHS = ("/v1/positions/close", "/v1/account/leverage", "/v1/account/margin-mode")
 """Writes outside ``/v1/orders``; ``/v1/account/leverage`` is a read on ``GET``."""
 
+WINDOW_ID = 1
+"""The one window the workspace fixtures know; ``2`` is used as a window that does not exist."""
+
 ACCOUNT_ROUTES = {
     "/v1/account/leverage": "leverage",
     "/v1/account/orders": "account_orders",
@@ -171,6 +174,8 @@ class FakeTerminal:
         if override is not None:
             body = override.raw if override.raw is not None else override.body
             return override.status, body, override.headers
+        if path.startswith("/v1/workspace"):
+            return self._workspace(method, path, body_in)
         if path.startswith("/v1/account/") and method == "GET":
             return self._account(path, query)
         if path.startswith("/v1/orders") or path in WRITE_PATHS:
@@ -209,6 +214,50 @@ class FakeTerminal:
         if name is None:
             return 404, load_fixture("error"), {}
         return 200, load_fixture(name), {}
+
+    @staticmethod
+    def _workspace(method: str, path: str, body_in: Any) -> tuple[int, Any, dict[str, str]]:
+        """``/v1/workspace*``: reads from the fixtures, writes answer the outcome fixture.
+
+        Window ``1`` exists with tab ``1``; stack ``12`` exists; the main
+        window refuses to close like the terminal does.
+        """
+        outcome = load_fixture("workspace_outcome")
+        parts = path.split("/")[3:]  # after /v1/workspace
+        if method == "GET":
+            if not parts:
+                return 200, load_fixture("workspace"), {}
+            if parts == ["windows", str(WINDOW_ID)]:
+                return 200, load_fixture("workspace_window"), {}
+            if parts[:1] == ["windows"]:
+                return 404, error_body("not_found", "no such window"), {}
+            return 404, load_fixture("error"), {}
+        if method == "POST" and parts == ["stacks"]:
+            if not isinstance(body_in, dict) or body_in.get("instrument") == "binance:futures:NOPE":
+                return 400, error_body("invalid_request", "unknown instrument"), {}
+            return 200, outcome, {}
+        if method == "POST" and parts == ["multiview"]:
+            return 200, outcome, {}
+        if parts[:1] == ["stacks"] and len(parts) == 2:
+            if parts[1] != "12":
+                return 404, error_body("not_found", "no stack with this widget_id"), {}
+            if method in ("PATCH", "DELETE"):
+                return 200, {**outcome, "stacks": [12], "charts": []}, {}
+        if parts[:1] == ["windows"] and len(parts) >= 2:
+            if parts[1] != str(WINDOW_ID):
+                return 404, error_body("not_found", "no such window"), {}
+            if len(parts) == 2 and method == "DELETE":
+                return 400, error_body("invalid_request", "the main window cannot be closed"), {}
+            if parts[2:] == ["activate"] and method == "POST":
+                return 200, {**outcome, "tab_id": None, "stacks": [], "charts": []}, {}
+            if parts[2:3] == ["tabs"] and len(parts) in (4, 5):
+                if parts[3] != "1":
+                    return 404, error_body("not_found", "no such tab"), {}
+                if len(parts) == 4 and method == "DELETE":
+                    return 400, error_body("invalid_request", "the only tab"), {}
+                if parts[4:] == ["activate"] and method == "POST":
+                    return 200, {**outcome, "tab_id": 1, "stacks": [], "charts": []}, {}
+        return 404, load_fixture("error"), {}
 
     @staticmethod
     def _trading(

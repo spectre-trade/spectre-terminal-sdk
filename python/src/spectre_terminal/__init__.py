@@ -6,8 +6,8 @@
     for connection in terminal.connections():
         print(connection.id, connection.exchange, connection.market, connection.status.state)
 
-The public surface is :class:`Terminal` (HTTP: market data, the account and
-trading commands), :class:`Stream` (WebSocket),
+The public surface is :class:`Terminal` (HTTP: market data, the account,
+trading commands and the workspace), :class:`Stream` (WebSocket),
 the models of :mod:`spectre_terminal.models`, the errors of
 :mod:`spectre_terminal.errors` and the discovery helpers of
 :mod:`spectre_terminal.discovery`. Importing the package touches no network.
@@ -37,6 +37,8 @@ from .models import (
     BookTop,
     Candle,
     Candles,
+    CellPosition,
+    Chart,
     Cluster,
     ClusterLevel,
     Clusters,
@@ -62,13 +64,18 @@ from .models import (
     Position,
     PositionUpdate,
     Snapshot,
+    Stack,
     Subscribed,
     SubscriptionError,
+    Tab,
     Ticker,
     Trade,
     Trades,
     TriggerOrder,
     Unsubscribed,
+    Window,
+    Workspace,
+    WorkspaceOutcome,
 )
 from .stream import Stream
 
@@ -76,9 +83,6 @@ __version__ = "0.1.0"
 
 __all__ = [
     "API_VERSION",
-    "DEFAULT_HOST",
-    "DEFAULT_PORT",
-    "TOKEN_ENV",
     "Accepted",
     "AccountBalances",
     "AccountFills",
@@ -89,11 +93,15 @@ __all__ = [
     "BookTop",
     "Candle",
     "Candles",
+    "CellPosition",
+    "Chart",
     "Cluster",
     "ClusterLevel",
     "Clusters",
     "Connection",
     "ConnectionStatus",
+    "DEFAULT_HOST",
+    "DEFAULT_PORT",
     "Event",
     "Fill",
     "Gap",
@@ -118,11 +126,14 @@ __all__ = [
     "PositionUpdate",
     "Snapshot",
     "SpectreTerminalError",
+    "Stack",
     "Stream",
     "StreamClosed",
     "StreamRequestError",
     "Subscribed",
     "SubscriptionError",
+    "TOKEN_ENV",
+    "Tab",
     "Terminal",
     "TerminalUnreachable",
     "Ticker",
@@ -131,6 +142,9 @@ __all__ = [
     "Trades",
     "TriggerOrder",
     "Unsubscribed",
+    "Window",
+    "Workspace",
+    "WorkspaceOutcome",
     "__version__",
     "instance_path",
     "read_port",

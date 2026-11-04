@@ -127,6 +127,7 @@ const limits = {
   // Optional in types.ts only for terminals older than the writing stage;
   // the fixture is the current terminal's answer and must carry it.
   commands_per_second: "int",
+  workspace_commands_per_second: "int",
 } as const;
 
 const meta = {
@@ -372,6 +373,44 @@ const leverage = {
   margin_mode: "string",
 } as const;
 
+const cellPosition = { column: "int", row: "int", cell: "int" } as const;
+
+const stack = {
+  widget_id: "int",
+  instrument: "string?",
+  connection_id: "int?",
+  empty: "bool",
+  frozen: "bool",
+  position: cellPosition,
+} as const;
+
+const chart = {
+  widget_id: "int",
+  instrument: "string?",
+  connection_id: "int?",
+  interval: "string",
+  owner_widget_id: "int?",
+  position: cellPosition,
+} as const;
+
+const tab = { id: "int", name: "string", active: "bool", stacks: [stack], charts: [chart] } as const;
+
+const window = {
+  id: "int",
+  main: "bool",
+  chart_window: "bool",
+  focused: "bool",
+  geometry: { x: "int", y: "int", width: "int", height: "int", maximized: "bool" },
+  monitor: "string?",
+  tabs: [tab],
+} as const;
+
+const workspace = { data: { windows: [window] } } as const;
+
+const workspaceWindow = { data: window } as const;
+
+const workspaceOutcome = { window_id: "int?", tab_id: "int?", stacks: ["int"], charts: ["int"] } as const;
+
 const errorEnvelope = { error: { code: "string", message: "string" } } as const;
 
 /** Fixture file → the shape it must match. One entry per operation. */
@@ -393,6 +432,9 @@ const SHAPES: Record<string, Spec> = {
   "account_fills.json": accountFills,
   "accepted.json": accepted,
   "leverage.json": leverage,
+  "workspace.json": workspace,
+  "workspace_window.json": workspaceWindow,
+  "workspace_outcome.json": workspaceOutcome,
   "error.json": errorEnvelope,
 };
 
@@ -410,9 +452,21 @@ for (const [file, spec] of Object.entries(SHAPES)) {
   });
 }
 
-test("meta.json names the four scopes", async () => {
+test("meta.json names the eight scopes", async () => {
   const fixture = JSON.parse(await readFile(new URL("meta.json", FIXTURES), "utf8")) as { scopes: string[] };
-  assert.deepEqual([...fixture.scopes].sort(), ["account:read", "connections:read", "market:read", "trading:write"]);
+  assert.deepEqual(
+    [...fixture.scopes].sort(),
+    [
+      "account:read",
+      "connections:read",
+      "market:read",
+      "settings:read",
+      "settings:write",
+      "trading:write",
+      "workspace:read",
+      "workspace:write",
+    ],
+  );
 });
 
 test("the checker itself catches a missing, an unknown and a mistyped field", () => {

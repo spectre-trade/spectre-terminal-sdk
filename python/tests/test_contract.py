@@ -45,6 +45,9 @@ from spectre_terminal.models import (
     Trades,
     TriggerOrder,
     Unsubscribed,
+    Window,
+    Workspace,
+    WorkspaceOutcome,
     topic_of,
 )
 
@@ -67,6 +70,9 @@ PARSERS: dict[str, Any] = {
     "account_fills": AccountFills.from_dict,
     "accepted": Accepted.from_dict,
     "leverage": Leverage.from_dict,
+    "workspace": Workspace.from_dict,
+    "workspace_window": lambda d: Window.from_dict(d["data"]),
+    "workspace_outcome": WorkspaceOutcome.from_dict,
 }
 
 FIXTURE_NAMES = sorted(path.stem for path in FIXTURES.glob("*.json"))
@@ -112,7 +118,17 @@ def test_meta_types() -> None:
     assert isinstance(meta.limits.ws_connections_per_token, int)
     assert meta.limits.exchange_subscriptions_per_second == 5
     assert meta.limits.commands_per_second == 10
-    assert meta.scopes == ["market:read", "connections:read", "account:read", "trading:write"]
+    assert meta.limits.workspace_commands_per_second == 5
+    assert meta.scopes == [
+        "market:read",
+        "connections:read",
+        "account:read",
+        "trading:write",
+        "workspace:read",
+        "workspace:write",
+        "settings:read",
+        "settings:write",
+    ]
     assert meta.topics == []
 
 

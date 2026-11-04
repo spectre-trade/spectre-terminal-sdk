@@ -21,6 +21,7 @@ import {
   type SubscriptionError,
   type Topic,
   type TradesEvent,
+  type WorkspaceEvent,
 } from "../src/index.ts";
 
 const TOKEN = `spt_${"ef".repeat(32)}`;
@@ -52,6 +53,20 @@ const FILL = {
   ts: 1730294400123,
 };
 
+const WORKSPACE = {
+  windows: [
+    {
+      id: 1,
+      main: true,
+      chart_window: false,
+      focused: true,
+      geometry: { x: 0, y: 0, width: 1920, height: 1080, maximized: true },
+      monitor: null,
+      tabs: [{ id: 1, name: "XRP", active: true, stacks: [], charts: [] }],
+    },
+  ],
+};
+
 let wss: WebSocketServer;
 let port: number;
 /** Every request the server received, decoded. */
@@ -76,6 +91,15 @@ function serve(socket: ServerSocket, request: Record<string, unknown>): void {
   const topic = String(request.topic);
   if (topic.startsWith("account.")) {
     serveAccount(socket, request, topic);
+    return;
+  }
+  if (topic === "workspace") {
+    if ("instrument" in request || "connection_id" in request) {
+      send(socket, { type: "error", request_id: requestId, code: "invalid_request", message: "workspace takes no instrument" });
+      return;
+    }
+    send(socket, { type: "subscribed", request_id: requestId, sub: "workspace" });
+    send(socket, { type: "event", sub: "workspace", seq: 1, ts: 1730294400140, data: WORKSPACE });
     return;
   }
   if (typeof request.instrument !== "string") {
@@ -443,4 +467,32 @@ test("StreamProtocol.abortAll rejects every waiting request", async () => {
     assert.equal(error.code, 1001);
   }
   assert.equal(protocol.pendingCount, 0);
+});
+
+test("workspace subscribes without instrument or connection and gets the snapshot first", async () => {
+  const stream = await terminal().stream();
+  const subscribed = await stream.subscribe({ topic: "workspace" });
+  assert.equal(subscribed.sub, "workspace");
+  assert.equal(subscribed.topic, "workspace");
+  assert.equal(subscribed.connection_id, undefined);
+  const request = received.at(-1)!;
+  assert.equal(request.topic, "workspace");
+  assert.ok(!("instrument" in request) && !("connection_id" in request));
+
+  // An instrument given with the workspace topic is dropped, not sent.
+  const again = await stream.subscribe({ topic: "workspace", instrument: "binance:futures:BTCUSDT", connectionId: 12 });
+  assert.equal(again.sub, "workspace");
+  assert.ok(!("instrument" in received.at(-1)!) && !("connection_id" in received.at(-1)!));
+
+  const frames: StreamFrame[] = [];
+  for await (const frame of stream) {
+    frames.push(frame);
+    break;
+  }
+  const event = frames[0] as WorkspaceEvent;
+  assert.equal(event.type, "event");
+  assert.equal(event.topic, "workspace");
+  assert.equal(event.sub, "workspace");
+  assert.equal(event.data.windows[0]?.tabs[0]?.name, "XRP");
+  await stream.close();
 });
