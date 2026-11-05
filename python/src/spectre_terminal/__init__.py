@@ -86,7 +86,12 @@ from .models import (
 )
 from .stream import Stream
 
-__version__ = "0.1.0"
+try:
+    from importlib.metadata import version as _version
+
+    __version__ = _version("spectre-terminal")
+except Exception:  # a source checkout without the package installed
+    __version__ = "0.0.0"
 
 __all__ = [
     "API_VERSION",

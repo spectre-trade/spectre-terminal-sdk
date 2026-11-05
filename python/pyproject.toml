@@ -11,7 +11,7 @@ license = "MIT"
 requires-python = ">=3.10"
 dependencies = ["websockets>=12"]
 classifiers = [
-  "Development Status :: 3 - Alpha",
+  "Development Status :: 5 - Production/Stable",
   "Intended Audience :: Developers",
   "Intended Audience :: Financial and Insurance Industry",
   "Programming Language :: Python :: 3",

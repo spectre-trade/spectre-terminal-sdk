@@ -1,10 +1,10 @@
 # MCP server
 
 `spectre-terminal-mcp` is a [Model Context Protocol](https://modelcontextprotocol.io)
-server that lets an AI agent — Claude Code, Claude Desktop, Cursor, any MCP
-client — read what the terminal sees. It is a thin package on top of the
-Python client: stdio transport, read-only, no state of its own. Source:
-[`mcp/`](../mcp/).
+server that gives an AI agent — Claude Code, Claude Desktop, Cursor, any MCP
+client — a running terminal: what it sees, the account, trading, the layout
+and settings. It is a thin package on top of the Python client: stdio
+transport, no state of its own. Source: [`mcp/`](../mcp/).
 
 ## Setup
 
@@ -44,8 +44,9 @@ when the terminal is not running: the first tool call then answers
 
 Tools are designed for a model, not as a mirror of the HTTP endpoints: short
 answers, one call per question, no thousand-row payloads in the context.
-Every tool is read-only and idempotent and says so in its annotations, so
-clients can call them without asking the user each time.
+Read tools are read-only and idempotent and say so in their annotations, so
+clients can call them without asking the user each time; the tools that
+trade, change the layout or write settings are annotated as destructive.
 
 | Tool | Arguments | Answers |
 | --- | --- | --- |
@@ -137,8 +138,9 @@ The token never appears in any message.
 
 ## What it does not do
 
-- No settings and no windows. Of trading, no grid moves and no MOEX. There
-  is no confirmation inside the server: the Local API toggle in the terminal
+- Of the layout, no moving stacks between tabs and no column widths; of
+  trading, no grid moves and no MOEX. There is no confirmation inside the
+  server: the Local API toggle in the terminal
   is the consent and the kill switch (product decision); MCP clients that
   confirm destructive tools do so on their own.
 - No streaming: MCP tools are request and response. An agent that needs live
