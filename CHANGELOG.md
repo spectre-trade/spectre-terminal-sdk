@@ -8,6 +8,11 @@ is a major bump and happens only with a new API version of the terminal.
 
 ## [Unreleased]
 
+### Changed
+
+- Releases are cut on every merge into `main` by `version-bump.yml`; the PR
+  label picks the step (see CONTRIBUTING.md).
+
 ## [0.1.0-rc.1] - 2026-11-05
 
 Release candidate against the terminal build of the Local API that is on
