@@ -8,6 +8,8 @@ is a major bump and happens only with a new API version of the terminal.
 
 ## [Unreleased]
 
+## [0.1.0-rc.2] - 2026-11-05
+
 ### Changed
 
 - Releases are cut on every merge into `main` by `version-bump.yml`; the PR
