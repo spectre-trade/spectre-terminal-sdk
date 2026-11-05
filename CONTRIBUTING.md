@@ -77,8 +77,9 @@ mcp/.venv/bin/python mcp/examples/smoke.py
 
 One version for all packages, in `CHANGELOG.md`. A tag `vX.Y.Z` publishes
 every package through GitHub Actions (`release.yml`: PyPI trusted publishing
-from the `pypi` environment, npm trusted publishing with provenance from the
-`npm` environment). There are no long-lived registry tokens in the repository.
+from the `pypi` environment for `spectre-terminal` and `pypi-mcp` for
+`spectre-terminal-mcp` — PyPI wants a distinct environment per project —, npm
+trusted publishing with provenance from the `npm` environment). There are no long-lived registry tokens in the repository.
 
 Steps for a release:
 

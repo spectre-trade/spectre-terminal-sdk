@@ -1,8 +1,10 @@
 # Publishes every package on a `vX.Y.Z` tag. The version of the tag must match
 # the three manifests; the CI workflow must already be green on that commit.
 #
-# PyPI: trusted publishing (OIDC) from the `pypi` environment — the projects
-# are registered on pypi.org as pending publishers of this workflow, no token.
+# PyPI: trusted publishing (OIDC), no token — the projects are registered on
+# pypi.org as pending publishers of this workflow, each with its own
+# environment (`pypi` for spectre-terminal, `pypi-mcp` for spectre-terminal-mcp):
+# PyPI refuses two pending publishers that differ only by project name.
 # npm: trusted publishing (OIDC) with provenance from the `npm` environment,
 # configured on the package after its first publish; a version that is already
 # on the registry is skipped, so the first manual publish and the tag do not
@@ -56,17 +58,23 @@ jobs:
           path: ${{ matrix.package }}/dist/
 
   publish-pypi:
-    needs: build-python
+    needs: [check, build-python]
     runs-on: ubuntu-latest
     environment:
-      name: pypi
-      url: https://pypi.org/project/spectre-terminal/${{ needs.check.outputs.version }}/
+      name: ${{ matrix.environment }}
+      url: https://pypi.org/project/${{ matrix.project }}/${{ needs.check.outputs.version }}/
     permissions:
       id-token: write
     strategy:
       max-parallel: 1
       matrix:
-        package: [python, mcp]
+        include:
+          - package: python
+            project: spectre-terminal
+            environment: pypi
+          - package: mcp
+            project: spectre-terminal-mcp
+            environment: pypi-mcp
     steps:
       - uses: actions/download-artifact@v4
         with:
