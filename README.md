@@ -5,11 +5,6 @@ read connections, the instrument catalogue, trades, order books, clusters,
 candles and the account from a running terminal on the same machine, and
 trade through it, over HTTP and WebSocket on `127.0.0.1`.
 
-> **Status: release candidate.** The Local API ships with the next terminal
-> release; the packages are published as pre-releases against its test build
-> (`pip install --pre spectre-terminal`, `npm install @spectre-trade/terminal@next`)
-> until that release is out.
-
 | Package | Language | Install | Requires |
 | --- | --- | --- | --- |
 | `spectre-terminal` | Python | `pip install spectre-terminal` | Python 3.10+ |
@@ -92,8 +87,9 @@ pip install spectre-terminal-mcp
 claude mcp add spectre-terminal -e SPECTRE_LOCAL_API_TOKEN=spt_… -- spectre-terminal-mcp
 ```
 
-Seven read-only tools — status, instrument lookup, snapshot, order book
-top, trades summary, clusters, candles — shaped for a model's context. See
+Tools for the terminal's status, instruments, market data, the account,
+trading, trigger orders, leverage, the layout and settings — shaped for a
+model's context, with the writes annotated as destructive. See
 [docs/mcp.md](docs/mcp.md).
 
 ## Documentation

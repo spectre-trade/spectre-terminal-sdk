@@ -8,11 +8,15 @@ is a major bump and happens only with a new API version of the terminal.
 
 ## [Unreleased]
 
+### Changed
+
+- Releases are cut on every merge into `main` by `version-bump.yml`; the PR
+  label picks the step (see CONTRIBUTING.md).
+
 ## [0.1.0-rc.1] - 2026-11-05
 
-Release candidate against the terminal build of the Local API that is on
-test (commit in `contract/TERMINAL_VERSION`); the packages are published as
-pre-releases (`pip install --pre`, npm dist-tag `next`).
+First published version, against Spectre Terminal 2.0.0 with Local API v1
+(the exact build in `contract/TERMINAL_VERSION`).
 
 ### Added
 
@@ -20,7 +24,7 @@ pre-releases (`pip install --pre`, npm dist-tag `next`).
   `/v1/stream` client, discovery through `instance.json`, contract tests
   against the terminal fixtures.
 - TypeScript client `@spectre-trade/terminal`: the same surface for Node 22+.
-- MCP server `spectre-terminal-mcp`: seven read-only tools over stdio on top of
+- MCP server `spectre-terminal-mcp`: the read tools over stdio on top of
   the Python client (`terminal_status`, `find_instrument`, `market_snapshot`,
   `order_book_top`, `recent_trades_summary`, `cluster_summary`, `candles`).
 - Account: `account_orders`, `account_positions`, `account_balances`,

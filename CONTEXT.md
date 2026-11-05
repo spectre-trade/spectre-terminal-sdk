@@ -6,8 +6,8 @@ it honest. For people and for coding agents alike.
 ## What
 
 Client libraries and an MCP server for the **Local API** of Spectre
-Terminal: a read-only HTTP/JSON and WebSocket/JSON interface the terminal
-serves on `127.0.0.1` when the trader switches it on. The API contract is
+Terminal: an HTTP/JSON and WebSocket/JSON interface the terminal serves on
+`127.0.0.1` when the trader switches it on. The API contract is
 owned by the terminal; this repository consumes it.
 
 ## Decisions
@@ -30,7 +30,7 @@ owned by the terminal; this repository consumes it.
   clear error on a terminal it does not support. Unknown fields, topics and
   scopes never break a client: within v1 the contract only grows.
 - **MCP lives here, not in the terminal.** `mcp/` is a package on top of the
-  Python client with a stdio transport and read-only tools designed for a
+  Python client with a stdio transport and tools designed for a
   model (compact answers: snapshot, best prices, cluster summaries), not a
   mirror of the HTTP endpoints. An MCP endpoint inside the terminal is
   deferred; it would be revisited only if traders must install nothing but

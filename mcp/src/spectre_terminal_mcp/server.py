@@ -1,4 +1,4 @@
-"""The MCP server: one :class:`MCPServer` with the read-only tools registered.
+"""The MCP server: one :class:`MCPServer` with every tool registered.
 
 ``spectre-terminal-mcp`` (or ``python -m spectre_terminal_mcp``) runs it over
 stdio, which is what Claude Code, Claude Desktop and Cursor expect. Nothing
