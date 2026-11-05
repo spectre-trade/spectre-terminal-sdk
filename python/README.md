@@ -176,7 +176,9 @@ opened = terminal.open_stack("binance:futures:BTCUSDT", chart=True, activate=Fal
 terminal.set_stack_instrument(opened.stacks[0], "binance:futures:ETHUSDT")
 terminal.close_tab(opened.window_id, opened.tab_id)
 
-majors = terminal.open_tab([TabItem("binance:futures:BTCUSDT", chart=True), "binance:futures:ETHUSDT"], name="Majors")
+majors = terminal.open_tab(
+    [TabItem("binance:futures:BTCUSDT", chart=True), "binance:futures:ETHUSDT"], name="Majors"
+)
 terminal.add_stacks(majors.window_id, majors.tab_id, ["binance:futures:SOLUSDT"])
 ```
 
