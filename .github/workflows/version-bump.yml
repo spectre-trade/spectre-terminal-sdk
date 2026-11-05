@@ -13,10 +13,8 @@
 #
 # scripts/bump_version.py writes the version into every manifest and closes
 # the [Unreleased] section of the changelog; the commit and the tag go to
-# main over the deploy key VERSION_BUMP_DEPLOY_KEY — the one actor the branch
-# ruleset lets past "pull requests only" — then release.yml is dispatched on
-# the tag (a push with the workflow token or a deploy key does not trigger
-# workflows by itself).
+# main, then release.yml is dispatched on the tag (a tag pushed with the
+# workflow token does not trigger workflows by itself).
 
 name: version-bump
 
@@ -42,7 +40,6 @@ jobs:
         with:
           ref: main
           fetch-depth: 0
-          ssh-key: ${{ secrets.VERSION_BUMP_DEPLOY_KEY }}
 
       - name: The kind of bump from the PR labels
         id: kind
