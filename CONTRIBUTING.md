@@ -88,7 +88,10 @@ Steps for a release:
    `CHANGELOG.md` to `[X.Y.Z] - YYYY-MM-DD` and open a fresh `[Unreleased]`.
 2. `contract/TERMINAL_VERSION` names a terminal release that is shipped: the
    packages promise what that terminal answers.
-3. Merge, then `git tag vX.Y.Z && git push origin vX.Y.Z`. The workflow
+3. Merge, then `git tag vX.Y.Z && git push origin vX.Y.Z`. A release
+   candidate is `vX.Y.Z-rc.N`: `X.Y.Z-rc.N` in `package.json`, `X.Y.ZrcN` in
+   the two `pyproject.toml`; it goes to npm under the `next` dist-tag and to
+   GitHub as a pre-release. The workflow
    refuses a tag whose version differs from any manifest or has no changelog
    section, and skips an npm version that is already on the registry.
 

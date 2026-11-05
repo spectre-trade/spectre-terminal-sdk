@@ -24,17 +24,22 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.version.outputs.version }}
+      prerelease: ${{ steps.version.outputs.prerelease }}
     steps:
       - uses: actions/checkout@v4
       - name: The tag matches every manifest
         id: version
         run: |
           tag="${GITHUB_REF_NAME#v}"
+          # A pre-release is `X.Y.Z-rc.N` on the tag and npm (SemVer) and
+          # `X.Y.ZrcN` on PyPI (PEP 440).
+          py_expected=$(echo "$tag" | sed -E 's/-rc\.([0-9]+)$/rc\1/')
           py=$(sed -n 's/^version = "\(.*\)"/\1/p' python/pyproject.toml)
           mcp=$(sed -n 's/^version = "\(.*\)"/\1/p' mcp/pyproject.toml)
           ts=$(node -p "require('./typescript/package.json').version")
           echo "tag=$tag python=$py mcp=$mcp typescript=$ts"
-          test "$tag" = "$py" -a "$tag" = "$mcp" -a "$tag" = "$ts"
+          test "$py_expected" = "$py" -a "$py_expected" = "$mcp" -a "$tag" = "$ts"
+          case "$tag" in *-*) echo "prerelease=true" >> "$GITHUB_OUTPUT" ;; *) echo "prerelease=false" >> "$GITHUB_OUTPUT" ;; esac
           grep -q "^## \[$tag\]" CHANGELOG.md || { echo "CHANGELOG.md has no section for $tag"; exit 1; }
           echo "version=$tag" >> "$GITHUB_OUTPUT"
 
@@ -111,6 +116,8 @@ jobs:
           version="${{ needs.check.outputs.version }}"
           if npm view "@spectre-trade/terminal@$version" version >/dev/null 2>&1; then
             echo "@spectre-trade/terminal@$version is already published, skipping"
+          elif [ "${{ needs.check.outputs.prerelease }}" = "true" ]; then
+            npm publish --provenance --access public --tag next
           else
             npm publish --provenance --access public
           fi
@@ -130,6 +137,8 @@ jobs:
             on && /^## \[/ { exit }
             on { print }
           ' CHANGELOG.md > notes.md
-          gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --notes-file notes.md
+          prerelease=""
+          [ "${{ needs.check.outputs.prerelease }}" = "true" ] && prerelease="--prerelease"
+          gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --notes-file notes.md $prerelease
         env:
           GH_TOKEN: ${{ github.token }}

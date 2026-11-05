@@ -5,9 +5,10 @@ read connections, the instrument catalogue, trades, order books, clusters,
 candles and the account from a running terminal on the same machine, and
 trade through it, over HTTP and WebSocket on `127.0.0.1`.
 
-> **Status: pre-release.** The Local API ships with the next terminal
-> release. Until then this repository is private and the packages are not
-> published.
+> **Status: release candidate.** The Local API ships with the next terminal
+> release; the packages are published as pre-releases against its test build
+> (`pip install --pre spectre-terminal`, `npm install @spectre-trade/terminal@next`)
+> until that release is out.
 
 | Package | Language | Install | Requires |
 | --- | --- | --- | --- |

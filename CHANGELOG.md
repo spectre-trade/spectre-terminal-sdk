@@ -8,6 +8,12 @@ is a major bump and happens only with a new API version of the terminal.
 
 ## [Unreleased]
 
+## [0.1.0-rc.1] - 2026-11-05
+
+Release candidate against the terminal build of the Local API that is on
+test (commit in `contract/TERMINAL_VERSION`); the packages are published as
+pre-releases (`pip install --pre`, npm dist-tag `next`).
+
 ### Added
 
 - Python client `spectre-terminal`: REST operations of Local API v1, the

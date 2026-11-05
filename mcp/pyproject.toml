@@ -4,13 +4,13 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "spectre-terminal-mcp"
-version = "0.1.0"
+version = "0.1.0rc1"
 description = "MCP server that lets AI agents read market data from a running Spectre Terminal"
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.10"
 dependencies = [
-    "spectre-terminal>=0.1.0,<0.2",
+    "spectre-terminal>=0.1.0rc1,<0.2",
     "mcp>=2,<3",
 ]
 classifiers = [
