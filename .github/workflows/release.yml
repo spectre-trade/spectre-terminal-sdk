@@ -28,6 +28,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.version.outputs.version }}
+      py_version: ${{ steps.version.outputs.py_version }}
       prerelease: ${{ steps.version.outputs.prerelease }}
     steps:
       - uses: actions/checkout@v4
@@ -46,6 +47,7 @@ jobs:
           case "$tag" in *-*) echo "prerelease=true" >> "$GITHUB_OUTPUT" ;; *) echo "prerelease=false" >> "$GITHUB_OUTPUT" ;; esac
           grep -q "^## \[$tag\]" CHANGELOG.md || { echo "CHANGELOG.md has no section for $tag"; exit 1; }
           echo "version=$tag" >> "$GITHUB_OUTPUT"
+          echo "py_version=$py_expected" >> "$GITHUB_OUTPUT"
 
   build-python:
     needs: check
@@ -71,7 +73,7 @@ jobs:
     runs-on: ubuntu-latest
     environment:
       name: ${{ matrix.environment }}
-      url: https://pypi.org/project/${{ matrix.project }}/${{ needs.check.outputs.version }}/
+      url: https://pypi.org/project/${{ matrix.project }}/${{ needs.check.outputs.py_version }}/
     permissions:
       id-token: write
     strategy:
