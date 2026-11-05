@@ -1,0 +1,95 @@
+# Releases a new version on every merge into main, the way the terminal bumps
+# its version after a merge — but here the tag is set at once, because a
+# package in a registry is harmless until someone installs it.
+#
+# The size of the step is a label on the PR:
+#   major → X+1.0.0   minor → X.Y+1.0   patch → X.Y.Z+1 (the default)
+#   rc    → the next release candidate (from a stable version: X.Y.Z+1-rc.1)
+#   release → the candidate becomes the stable X.Y.Z
+#   no-release → nothing happens (docs, CI, housekeeping)
+# While the current version is a release candidate the default is `rc`, and
+# only `rc` and `release` are accepted: a candidate is finished or continued,
+# not skipped over.
+#
+# scripts/bump_version.py writes the version into every manifest and closes
+# the [Unreleased] section of the changelog; the commit and the tag go to
+# main, then release.yml is dispatched on the tag (a tag pushed with the
+# workflow token does not trigger workflows by itself).
+
+name: version-bump
+
+on:
+  pull_request:
+    types: [closed]
+    branches: [main]
+
+concurrency:
+  group: version-bump-main
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  actions: write
+
+jobs:
+  bump:
+    if: github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: The kind of bump from the PR labels
+        id: kind
+        env:
+          LABELS: ${{ toJSON(github.event.pull_request.labels.*.name) }}
+        run: |
+          set -euo pipefail
+          current=$(node -p "require('./typescript/package.json').version")
+          default=patch
+          case "$current" in *-rc.*) default=rc ;; esac
+          kind=$(jq -r --arg default "$default" '
+            if index("no-release") then "skip"
+            elif index("major") then "major"
+            elif index("minor") then "minor"
+            elif index("patch") then "patch"
+            elif index("release") then "release"
+            elif index("rc") then "rc"
+            else $default end
+          ' <<< "$LABELS")
+          echo "kind=$kind" >> "$GITHUB_OUTPUT"
+          echo "current=$current kind=$kind labels=$LABELS"
+
+      - uses: actions/setup-node@v4
+        if: steps.kind.outputs.kind != 'skip'
+        with:
+          node-version: 24
+
+      - name: Bump every manifest and close the changelog
+        if: steps.kind.outputs.kind != 'skip'
+        id: bump
+        run: |
+          set -euo pipefail
+          version=$(python3 scripts/bump_version.py "${{ steps.kind.outputs.kind }}")
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          git diff --stat
+
+      - name: Commit, tag and push
+        if: steps.kind.outputs.kind != 'skip'
+        run: |
+          set -euo pipefail
+          version="${{ steps.bump.outputs.version }}"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "chore(release): $version (#${{ github.event.pull_request.number }})"
+          git tag -a "v$version" -m "v$version"
+          git push origin main "v$version"
+
+      - name: Dispatch the release workflow on the tag
+        if: steps.kind.outputs.kind != 'skip'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run release.yml --ref "v${{ steps.bump.outputs.version }}"

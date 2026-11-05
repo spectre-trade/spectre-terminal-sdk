@@ -81,19 +81,33 @@ from the `pypi` environment for `spectre-terminal` and `pypi-mcp` for
 `spectre-terminal-mcp` — PyPI wants a distinct environment per project —, npm
 trusted publishing with provenance from the `npm` environment). There are no long-lived registry tokens in the repository.
 
-Steps for a release:
+Every merge into `main` is a release (`version-bump.yml`), and the PR's
+label says how big:
 
-1. Set the same version in `python/pyproject.toml`, `mcp/pyproject.toml` and
-   `typescript/package.json`; rename the `[Unreleased]` section of
-   `CHANGELOG.md` to `[X.Y.Z] - YYYY-MM-DD` and open a fresh `[Unreleased]`.
-2. `contract/TERMINAL_VERSION` names a terminal release that is shipped: the
-   packages promise what that terminal answers.
-3. Merge, then `git tag vX.Y.Z && git push origin vX.Y.Z`. A release
-   candidate is `vX.Y.Z-rc.N`: `X.Y.Z-rc.N` in `package.json`, `X.Y.ZrcN` in
-   the two `pyproject.toml`; it goes to npm under the `next` dist-tag and to
-   GitHub as a pre-release. The workflow
-   refuses a tag whose version differs from any manifest or has no changelog
-   section, and skips an npm version that is already on the registry.
+| Label | Next version |
+| --- | --- |
+| `patch` (default when no label) | `X.Y.Z+1` |
+| `minor` | `X.Y+1.0` — a new operation, field, model or MCP tool |
+| `major` | `X+1.0.0` — a new API version of the terminal |
+| `rc` | the next release candidate; from a stable version `X.Y.Z+1-rc.1` |
+| `release` | the candidate becomes the stable `X.Y.Z` |
+| `no-release` | nothing is published — docs, CI, housekeeping |
+
+While the current version is a candidate, the default is `rc` and only `rc`
+and `release` are accepted. After the merge the workflow writes the version
+into the three manifests (`X.Y.Z-rc.N` in `package.json`, `X.Y.ZrcN` in the
+two `pyproject.toml`), turns the `[Unreleased]` section of `CHANGELOG.md`
+into `[X.Y.Z] - date`, commits to `main`, tags `vX.Y.Z` and dispatches
+`release.yml` on it. So a PR only has to describe its change under
+`[Unreleased]`; the version is never edited by hand. A candidate goes to npm
+under the `next` dist-tag and to GitHub as a pre-release.
+
+`contract/TERMINAL_VERSION` names the terminal build the packages promise;
+a stable version is released only against a terminal release that is
+shipped. `release.yml` refuses a tag whose version differs from any manifest
+or has no changelog section, and skips an npm version that is already on
+the registry, so a tag pushed by hand (`git tag vX.Y.Z && git push origin
+vX.Y.Z`) works the same way.
 
 The very first npm publish of `@spectre-trade/terminal` is made by hand
 (`npm publish --access public` from `typescript/` with a 2FA code): npm lets a

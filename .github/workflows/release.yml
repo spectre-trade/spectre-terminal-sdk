@@ -1,5 +1,8 @@
 # Publishes every package on a `vX.Y.Z` tag. The version of the tag must match
 # the three manifests; the CI workflow must already be green on that commit.
+# Normally the tag is made by version-bump.yml after a merge, which then
+# dispatches this workflow on it (a tag pushed with the workflow token does not
+# trigger workflows by itself); a tag pushed by hand works the same.
 #
 # PyPI: trusted publishing (OIDC), no token — the projects are registered on
 # pypi.org as pending publishers of this workflow, each with its own
@@ -15,6 +18,7 @@ name: release
 on:
   push:
     tags: ["v*.*.*"]
+  workflow_dispatch:
 
 permissions:
   contents: read
