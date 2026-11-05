@@ -11,6 +11,13 @@
     "websocket"
   ],
   "license": "MIT",
+  "homepage": "https://github.com/spectre-trade/spectre-terminal-sdk#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/spectre-trade/spectre-terminal-sdk.git",
+    "directory": "typescript"
+  },
+  "bugs": "https://github.com/spectre-trade/spectre-terminal-sdk/issues",
   "type": "module",
   "engines": {
     "node": ">=22"

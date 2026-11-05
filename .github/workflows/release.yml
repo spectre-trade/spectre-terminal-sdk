@@ -1,0 +1,127 @@
+# Publishes every package on a `vX.Y.Z` tag. The version of the tag must match
+# the three manifests; the CI workflow must already be green on that commit.
+#
+# PyPI: trusted publishing (OIDC) from the `pypi` environment — the projects
+# are registered on pypi.org as pending publishers of this workflow, no token.
+# npm: trusted publishing (OIDC) with provenance from the `npm` environment,
+# configured on the package after its first publish; a version that is already
+# on the registry is skipped, so the first manual publish and the tag do not
+# collide. No long-lived registry tokens anywhere.
+
+name: release
+
+on:
+  push:
+    tags: ["v*.*.*"]
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: The tag matches every manifest
+        id: version
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          py=$(sed -n 's/^version = "\(.*\)"/\1/p' python/pyproject.toml)
+          mcp=$(sed -n 's/^version = "\(.*\)"/\1/p' mcp/pyproject.toml)
+          ts=$(node -p "require('./typescript/package.json').version")
+          echo "tag=$tag python=$py mcp=$mcp typescript=$ts"
+          test "$tag" = "$py" -a "$tag" = "$mcp" -a "$tag" = "$ts"
+          grep -q "^## \[$tag\]" CHANGELOG.md || { echo "CHANGELOG.md has no section for $tag"; exit 1; }
+          echo "version=$tag" >> "$GITHUB_OUTPUT"
+
+  build-python:
+    needs: check
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        package: [python, mcp]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: python -m pip install build
+      - run: python -m build --outdir dist
+        working-directory: ${{ matrix.package }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist-${{ matrix.package }}
+          path: ${{ matrix.package }}/dist/
+
+  publish-pypi:
+    needs: build-python
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/project/spectre-terminal/${{ needs.check.outputs.version }}/
+    permissions:
+      id-token: write
+    strategy:
+      max-parallel: 1
+      matrix:
+        package: [python, mcp]
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist-${{ matrix.package }}
+          path: dist/
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist/
+
+  publish-npm:
+    needs: check
+    runs-on: ubuntu-latest
+    environment:
+      name: npm
+      url: https://www.npmjs.com/package/@spectre-trade/terminal/v/${{ needs.check.outputs.version }}
+    permissions:
+      contents: read
+      id-token: write
+    defaults:
+      run:
+        working-directory: typescript
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+          cache: npm
+          cache-dependency-path: typescript/package-lock.json
+      - run: npm ci
+      - run: npm test
+      - name: Publish unless this version is already on the registry
+        run: |
+          version="${{ needs.check.outputs.version }}"
+          if npm view "@spectre-trade/terminal@$version" version >/dev/null 2>&1; then
+            echo "@spectre-trade/terminal@$version is already published, skipping"
+          else
+            npm publish --provenance --access public
+          fi
+
+  github-release:
+    needs: [check, publish-pypi, publish-npm]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Release notes from the changelog section
+        run: |
+          version="${{ needs.check.outputs.version }}"
+          awk -v v="$version" '
+            $0 ~ "^## \\[" v "\\]" { on = 1; next }
+            on && /^## \[/ { exit }
+            on { print }
+          ' CHANGELOG.md > notes.md
+          gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --notes-file notes.md
+        env:
+          GH_TOKEN: ${{ github.token }}

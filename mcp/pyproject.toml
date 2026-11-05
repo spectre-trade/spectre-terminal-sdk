@@ -23,6 +23,12 @@ classifiers = [
 ]
 keywords = ["spectre", "trading", "terminal", "mcp", "model-context-protocol", "market-data"]
 
+[project.urls]
+Homepage = "https://github.com/spectre-trade/spectre-terminal-sdk"
+Repository = "https://github.com/spectre-trade/spectre-terminal-sdk"
+Changelog = "https://github.com/spectre-trade/spectre-terminal-sdk/blob/main/CHANGELOG.md"
+Issues = "https://github.com/spectre-trade/spectre-terminal-sdk/issues"
+
 [project.optional-dependencies]
 dev = ["pytest>=8", "pytest-asyncio>=0.24", "ruff>=0.6"]
 

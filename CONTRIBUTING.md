@@ -76,5 +76,23 @@ mcp/.venv/bin/python mcp/examples/smoke.py
 ## Releasing
 
 One version for all packages, in `CHANGELOG.md`. A tag `vX.Y.Z` publishes
-every package through GitHub Actions (PyPI trusted publishing, npm
-provenance). There are no long-lived registry tokens in the repository.
+every package through GitHub Actions (`release.yml`: PyPI trusted publishing
+from the `pypi` environment, npm trusted publishing with provenance from the
+`npm` environment). There are no long-lived registry tokens in the repository.
+
+Steps for a release:
+
+1. Set the same version in `python/pyproject.toml`, `mcp/pyproject.toml` and
+   `typescript/package.json`; rename the `[Unreleased]` section of
+   `CHANGELOG.md` to `[X.Y.Z] - YYYY-MM-DD` and open a fresh `[Unreleased]`.
+2. `contract/TERMINAL_VERSION` names a terminal release that is shipped: the
+   packages promise what that terminal answers.
+3. Merge, then `git tag vX.Y.Z && git push origin vX.Y.Z`. The workflow
+   refuses a tag whose version differs from any manifest or has no changelog
+   section, and skips an npm version that is already on the registry.
+
+The very first npm publish of `@spectre-trade/terminal` is made by hand
+(`npm publish --access public` from `typescript/` with a 2FA code): npm lets a
+trusted publisher be configured only on a package that already exists. After
+that, the package settings on npmjs.com get this repository and `release.yml`
+as the trusted publisher, and every later release comes from the tag.

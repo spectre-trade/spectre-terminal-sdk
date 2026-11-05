@@ -19,6 +19,13 @@ classifiers = [
   "Topic :: Office/Business :: Financial :: Investment",
   "Typing :: Typed",
 ]
+keywords = ["spectre", "trading", "terminal", "market-data", "orderbook", "websocket"]
+
+[project.urls]
+Homepage = "https://github.com/spectre-trade/spectre-terminal-sdk"
+Repository = "https://github.com/spectre-trade/spectre-terminal-sdk"
+Changelog = "https://github.com/spectre-trade/spectre-terminal-sdk/blob/main/CHANGELOG.md"
+Issues = "https://github.com/spectre-trade/spectre-terminal-sdk/issues"
 
 [project.optional-dependencies]
 dev = ["pytest", "ruff"]
