@@ -22,7 +22,8 @@ export SPECTRE_LOCAL_API_TOKEN=spt_…        # Linux, macOS
 setx SPECTRE_LOCAL_API_TOKEN spt_…          # Windows, new shells
 ```
 
-The token grants the same read access the terminal window has. Treat it as a
+The token grants everything the terminal window can do, including placing
+orders. Treat it as a
 secret: do not commit it, do not paste it into a bug report. **Reissue token**
 revokes it immediately.
 
@@ -96,7 +97,8 @@ Everything about subscriptions, gaps, conflation and close codes is in
 
 ## What the API does not do
 
-Version 1 is read-only: no orders, no settings, no opening windows. Data of
-MOEX is not served. Requests from browser pages are refused (the API has no
+Version 1 does not answer for the outcome on the exchange: `accepted` means
+accepted by the terminal, and the outcome is read from the account. Data of
+MOEX is not served and there is no trading on MOEX. Requests from browser pages are refused (the API has no
 CORS layer on purpose), so the clients are for scripts, bots and desktop
 tools, not for web pages.

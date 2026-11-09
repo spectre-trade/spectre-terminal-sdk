@@ -58,8 +58,8 @@ the clients do not cache the token anywhere.
 - Put it in the environment of the one program that needs it, or in a
   secrets store your platform provides. Not in source, not in a config file
   you commit, not in a chat.
-- The token grants read access to market data and to the list of exchange
-  connections. It never exposes exchange keys: the API has no field for them,
+- The token grants everything the terminal window can do: market data, the
+  account, trading, the layout and settings. It never exposes exchange keys: the API has no field for them,
   not even masked.
 - If it leaks, reissue. There is no partial revocation; the terminal has one
   token.
