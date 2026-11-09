@@ -8,6 +8,10 @@ is a major bump and happens only with a new API version of the terminal.
 
 ## [Unreleased]
 
+## [0.1.0-rc.3] - 2026-11-09
+
+No user-facing changes.
+
 ## [0.1.0-rc.2] - 2026-11-05
 
 ### Changed
